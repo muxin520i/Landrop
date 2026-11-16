@@ -20,6 +20,12 @@ class DeviceIdentity {
   final String platform;
 
   static Future<DeviceIdentity> load() async {
+    final platform = Platform.isIOS
+        ? 'ios'
+        : Platform.isAndroid
+            ? 'android'
+            : 'desktop';
+
     final dir = await getApplicationSupportDirectory();
     final file = File('${dir.path}/identity.json');
 
@@ -27,7 +33,18 @@ class DeviceIdentity {
     if (await file.exists()) {
       try {
         final map = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-        savedId = map['id'] as String?;
+        final id = (map['id'] as String?)?.trim();
+        final alias = (map['alias'] as String?)?.trim();
+        // 型号与别名都不会变，命中缓存就直接返回，
+        // 跳过 device_info 平台通道（Android 冷启动里最贵的一次调用之一）
+        if (id != null && id.isNotEmpty && alias != null && alias.isNotEmpty) {
+          return DeviceIdentity(
+            id: id,
+            alias: alias,
+            platform: (map['platform'] as String?) ?? platform,
+          );
+        }
+        savedId = id;
       } catch (_) {
         // 文件损坏则重新生成
       }
@@ -35,19 +52,17 @@ class DeviceIdentity {
 
     final id = savedId ?? const Uuid().v4();
     final alias = await _resolveAlias(id);
-    final platform = Platform.isIOS
-        ? 'ios'
-        : Platform.isAndroid
-            ? 'android'
-            : 'desktop';
-
     final identity = DeviceIdentity(id: id, alias: alias, platform: platform);
 
-    if (savedId == null) {
+    // 首次或旧版缓存缺少 alias 时补写，下次启动即走快速路径
+    try {
       await file.writeAsString(jsonEncode({
         'id': identity.id,
         'alias': identity.alias,
+        'platform': identity.platform,
       }));
+    } catch (_) {
+      // 写失败只影响下次启动速度，不影响功能
     }
     return identity;
   }

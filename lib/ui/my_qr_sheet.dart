@@ -21,7 +21,7 @@ class _MyQrSheet extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isLight = Theme.of(context).brightness == Brightness.light;
 
-    if (!app.initialized) {
+    if (!app.initialized || !app.localIpResolved) {
       return const SizedBox(
         height: 240,
         child: Center(child: CircularProgressIndicator()),

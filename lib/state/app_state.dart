@@ -19,8 +19,9 @@ import '../core/transfer_server.dart';
 /// 全局状态：设备发现、消息流、收发调度。
 class AppState extends ChangeNotifier {
   late DeviceIdentity identity;
-  late TransferServer _server;
-  late DiscoveryService _discovery;
+  TransferServer? _server;
+  DiscoveryService? _discovery;
+  StreamSubscription<List<PeerDevice>>? _peerSub;
 
   final ChatStore _store = ChatStore();
   final TransferClient _client = TransferClient();
@@ -29,12 +30,23 @@ class AppState extends ChangeNotifier {
   List<ChatMessage> messages = [];
   String? activePeerId;
   String? localIp;
+
+  /// 本机 IP 已解析完成（无论有没有解析到），用于区分「还没查」与「确实没有 Wi-Fi」
+  bool localIpResolved = false;
+
+  /// 传输服务与设备发现已就绪。UI 不依赖它，只用于「连接码」等功能的前置判断。
   bool initialized = false;
+
+  /// 历史记录已读完。用于区分「确实没有记录」与「还在读」。
+  bool historyLoaded = false;
+
+  bool _initStarted = false;
+  bool _disposed = false;
 
   int _activeTransfers = 0;
   int _lastNotifyAt = 0;
 
-  int get port => _server.port;
+  int get port => _server?.port ?? 0;
 
   PeerDevice? get activePeer {
     if (activePeerId == null) return null;
@@ -47,33 +59,58 @@ class AppState extends ChangeNotifier {
   bool get hasOnlinePeer => peers.any((p) => p.isOnline);
 
   Future<void> init() async {
-    if (initialized) return;
-    identity = await DeviceIdentity.load();
+    if (_initStarted) return;
+    _initStarted = true;
 
-    _server = TransferServer(
+    // 三件事互不依赖，一起发起，避免平台通道调用串行累加
+    final identityFuture = DeviceIdentity.load();
+    final historyFuture = _store.load();
+    final ipFuture = DeviceIdentity.localIpv4();
+
+    // 历史记录先落地：首帧之后几十毫秒就渲染出来，不必等服务和扫描
+    messages = await historyFuture;
+    historyLoaded = true;
+    _syncActivePeer();
+    notifyListeners();
+
+    identity = await identityFuture;
+
+    final server = TransferServer(
       identity: identity,
       onIncomingCreated: _onIncomingCreated,
       onProgress: _onProgress,
       onCompleted: _onCompleted,
       onFailed: _onFailed,
     );
-    await _server.start();
+    _server = server;
+    await server.start();
+    if (_disposed) {
+      server.stop();
+      return;
+    }
 
-    localIp = await DeviceIdentity.localIpv4();
-
-    _discovery = DiscoveryService(selfId: identity.id, port: _server.port);
-    _discovery.stream.listen((list) {
+    final discovery = DiscoveryService(selfId: identity.id, port: server.port);
+    _discovery = discovery;
+    _peerSub = discovery.stream.listen((list) {
       peers = list;
       _syncActivePeer();
       notifyListeners();
     });
 
-    messages = await _store.load();
-
-    await _discovery.start();
-    _syncActivePeer();
     initialized = true;
+    _syncActivePeer();
     notifyListeners();
+
+    // 设备发现是纯后台行为，绝不能挡住首屏：这里只发起，不等待
+    unawaited(discovery.start());
+
+    // 本机 IP 只给「连接码」二维码用，回来得晚也没关系
+    unawaited(ipFuture.then((ip) {
+      if (_disposed) return;
+      localIp = ip;
+      localIpResolved = true;
+      notifyListeners();
+    }));
   }
 
   void _syncActivePeer() {
@@ -92,7 +129,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> rescan() => _discovery.rescan();
+  Future<void> rescan() async {
+    await _discovery?.rescan();
+  }
 
   // ---------------------------------------------------------------- 发送
 
@@ -271,10 +310,11 @@ class AppState extends ChangeNotifier {
   }
 
   PeerDevice? addPeerFromQr(String raw) {
+    final discovery = _discovery;
     final peer = PeerDevice.fromQrPayload(raw);
-    if (peer == null) return null;
+    if (discovery == null || peer == null) return null;
     activePeerId = peer.id;
-    _discovery.addPeer(peer);
+    discovery.addPeer(peer);
     unawaited(_refreshPeer(peer));
     notifyListeners();
     return peer;
@@ -298,7 +338,7 @@ class AppState extends ChangeNotifier {
         lastSeen: DateTime.now(),
       );
       activePeerId = real.id;
-      _discovery.addPeer(real);
+      _discovery?.addPeer(real);
       notifyListeners();
     } catch (_) {
       // 扫码后对方可能已离线，保留二维码里的地址供重试
@@ -332,8 +372,10 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
-    _discovery.dispose();
-    _server.stop();
+    _disposed = true;
+    _peerSub?.cancel();
+    _discovery?.dispose();
+    _server?.stop();
     super.dispose();
   }
 }

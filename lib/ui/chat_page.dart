@@ -42,7 +42,6 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    if (!app.initialized) return const _BootScreen();
 
     if (app.messages.length != _lastCount) {
       _lastCount = app.messages.length;
@@ -102,34 +101,37 @@ class _ChatPageState extends State<ChatPage> {
             onScan: () => _openScan(app),
           ),
           Expanded(
-            child: app.messages.isEmpty
-                ? _EmptyState(
-                    onScan: () => _openScan(app),
-                    onQr: () => showMyQrSheet(context),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
-                    itemCount: app.messages.length,
-                    itemBuilder: (context, index) {
-                      final message = app.messages[index];
-                      final prev =
-                          index > 0 ? app.messages[index - 1] : null;
-                      final showTime = prev == null ||
-                          (message.timestamp - prev.timestamp).abs() >
-                              5 * 60 * 1000;
-                      return Column(
-                        children: [
-                          if (showTime)
-                            _TimeDivider(timestamp: message.timestamp),
-                          MessageBubble(
-                            message: message,
-                            onTap: () => _onBubbleTap(app, message),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+            child: !app.historyLoaded
+                // 记录还在读，先留白：不要用「空状态」占位，否则会闪一下
+                ? const SizedBox.expand()
+                : app.messages.isEmpty
+                    ? _EmptyState(
+                        onScan: () => _openScan(app),
+                        onQr: () => showMyQrSheet(context),
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+                        itemCount: app.messages.length,
+                        itemBuilder: (context, index) {
+                          final message = app.messages[index];
+                          final prev =
+                              index > 0 ? app.messages[index - 1] : null;
+                          final showTime = prev == null ||
+                              (message.timestamp - prev.timestamp).abs() >
+                                  5 * 60 * 1000;
+                          return Column(
+                            children: [
+                              if (showTime)
+                                _TimeDivider(timestamp: message.timestamp),
+                              MessageBubble(
+                                message: message,
+                                onTap: () => _onBubbleTap(app, message),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
           ),
           _buildComposer(app),
         ],
@@ -347,55 +349,6 @@ class _ChatPageState extends State<ChatPage> {
       ..showSnackBar(
         SnackBar(content: Text(text), duration: const Duration(seconds: 3)),
       );
-  }
-}
-
-class _BootScreen extends StatelessWidget {
-  const _BootScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [scheme.primary, scheme.primary.withOpacity(0.65)],
-                ),
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: const Icon(
-                Icons.swap_horiz_rounded,
-                color: Colors.white,
-                size: 40,
-              ),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              '近传',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.2,
-                color: scheme.primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

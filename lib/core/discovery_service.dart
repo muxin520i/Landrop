@@ -27,6 +27,7 @@ class DiscoveryService {
   Timer? _timer;
   bool _scanning = false;
   bool _disposed = false;
+  bool _dirty = false;
   int _round = 0;
   String? _localIp;
 
@@ -41,10 +42,14 @@ class DiscoveryService {
     return list;
   }
 
+  /// 启动轮询。**只发起首轮扫描，不等待结果**——调用方（首屏）不能被网络探测拖住。
   Future<void> start() async {
-    _localIp = await DeviceIdentity.localIpv4();
-    await _scanOnce(full: true);
-    _timer = Timer.periodic(Protocol.scanInterval, (_) => _scanOnce(full: false));
+    if (_disposed) return;
+    _timer ??= Timer.periodic(
+      Protocol.scanInterval,
+      (_) => _scanOnce(full: false),
+    );
+    unawaited(_scanOnce(full: true));
   }
 
   /// 用户从扫码页回来时可主动触发一次。
@@ -54,8 +59,17 @@ class DiscoveryService {
     if (_scanning || _disposed) return;
     _scanning = true;
     _round++;
+    _dirty = false;
     try {
-      _localIp = await DeviceIdentity.localIpv4();
+      final doFull = full || _round % 3 == 1;
+
+      // 只有全量扫描才重新读网卡：切 Wi-Fi、换网段基本都靠它兜住，
+      // 而每 10 秒做一次的增量轮次没必要反复走平台通道。
+      if (doFull || _localIp == null) {
+        _localIp = await DeviceIdentity.localIpv4();
+      }
+      if (_disposed) return;
+
       final hosts = <String>[];
 
       // 已知在线设备每轮都复探，保证状态及时刷新
@@ -63,7 +77,6 @@ class DiscoveryService {
         hosts.add(device.host);
       }
 
-      final doFull = full || _round % 3 == 1;
       if (doFull && _localIp != null) {
         final prefix = _localIp!.substring(0, _localIp!.lastIndexOf('.'));
         for (var i = 1; i <= 254; i++) {
@@ -83,14 +96,24 @@ class DiscoveryService {
             (i + Protocol.probeConcurrency).clamp(0, hosts.length).toInt();
         final batch = hosts.sublist(i, end);
         await Future.wait(batch.map((h) => _probe(h, client)));
+        // 边扫边推：设备一被发现就出现在列表里，不用等 254 个地址扫完
+        if (_dirty) {
+          _dirty = false;
+          _emit();
+        }
       }
       client.close(force: true);
 
       // 超过阈值没探测到的设备从列表移除
+      final before = _devices.length;
       _devices.removeWhere(
         (_, d) => DateTime.now().difference(d.lastSeen) > Protocol.offlineAfter,
       );
-      _emit();
+      if (_devices.length != before) _dirty = true;
+      if (_dirty) {
+        _dirty = false;
+        _emit();
+      }
     } finally {
       _scanning = false;
     }
@@ -114,6 +137,8 @@ class DiscoveryService {
       if (map['app'] != 'landrop') return;
       final id = map['id'] as String?;
       if (id == null || id == selfId) return;
+      final previous = _devices[id];
+      if (previous == null || !previous.isOnline) _dirty = true;
       _devices[id] = PeerDevice.fromInfo(
         map,
         host: host,
