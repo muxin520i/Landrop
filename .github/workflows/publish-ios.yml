@@ -1,0 +1,46 @@
+name: Publish iOS IPA
+
+# 把某次 iOS 构建产出的 ipa 挂到指定 Release 上
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'iOS 构建所在的 run id'
+        required: true
+      tag:
+        description: '目标 Release tag'
+        required: true
+        default: 'v1.0.1'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download iOS artifact from build run
+        uses: actions/download-artifact@v4
+        with:
+          name: landrop-ios-ipa
+          path: ipa
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Inspect
+        run: ls -lh ipa
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ inputs.tag }}" ipa/Landrop-unsigned.ipa \
+            --clobber --repo "${{ github.repository }}"
+
+      - name: Show release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" --json assets \
+            -q '.assets[] | "\(.name)  \(.size) bytes"'
