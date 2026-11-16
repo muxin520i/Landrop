@@ -75,6 +75,8 @@ jobs:
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'ios'))
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -105,11 +107,30 @@ jobs:
           path: build/ios/iphoneos/Landrop-unsigned.ipa
           if-no-files-found: error
 
+      # 打成 tag 时：等 Android 先把 Release 建好（最多等 5 分钟），再把 ipa 挂上去
+      - name: Attach IPA to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in $(seq 1 10); do
+            if gh release upload "${GITHUB_REF_NAME}" build/ios/iphoneos/Landrop-unsigned.ipa \
+                 --clobber --repo "${GITHUB_REPOSITORY}"; then
+              echo "ipa 已挂到 ${GITHUB_REF_NAME}"
+              exit 0
+            fi
+            echo "第 $i 次失败，30 秒后重试（可能 Release 还没建好）"
+            sleep 30
+          done
+          echo "未能自动挂载，可从本次运行的 Artifacts 下载"; exit 1
+
   release:
     name: Publish Release
-    # iOS 已经能稳定出包：等它一起发；但 iOS 失败也照发 Android，不互相拖住
-    if: always() && startsWith(github.ref, 'refs/tags/v')
-    needs: [android, ios]
+    # 只等 Android：macOS 排队可能很久，不能让 APK 跟着一起等。
+    # iOS 出包后由 ios job 自己补挂到同一个 Release（见 Attach IPA）。
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
