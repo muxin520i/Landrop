@@ -107,19 +107,34 @@ jobs:
 
   release:
     name: Publish Release
+    # 不等 iOS：macOS runner 在免费账户上经常排不到，不能因为它把 Android 的发布也拖住
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [android, ios]
+    needs: [android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # 已经手动建过 Release 的版本不再覆盖，避免冲掉手写的更新说明
+      - name: Check whether release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}")
+          echo "exists=$([ "$code" = "200" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
+        if: steps.existing.outputs.exists == 'false'
         with:
           path: artifacts
 
       - uses: softprops/action-gh-release@v2
+        if: steps.existing.outputs.exists == 'false'
         with:
           files: |
             artifacts/landrop-android-apk/app-release.apk
             artifacts/landrop-ios-ipa/Landrop-unsigned.ipa
+          fail_on_unmatched_files: false
           generate_release_notes: true

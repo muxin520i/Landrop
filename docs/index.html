@@ -487,7 +487,9 @@
 
   function applyRelease(rel, fromCache) {
     var assets = rel.assets || [];
-    var apk = assets.filter(function (a) { return /\.apk$/i.test(a.name); })[0];
+    // 一个版本里可能同时挂多个 apk（分架构包、CI 产物），优先挑 arm64 那份
+    var apks = assets.filter(function (a) { return /\.apk$/i.test(a.name); });
+    var apk = apks.filter(function (a) { return /arm64/i.test(a.name); })[0] || apks[0];
     var ipa = assets.filter(function (a) { return /\.ipa$/i.test(a.name); })[0];
 
     var ver = document.getElementById("verChip");
