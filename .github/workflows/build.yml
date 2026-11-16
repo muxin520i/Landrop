@@ -5,10 +5,21 @@ on:
     branches: [main, master]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      target:
+        description: '构建目标'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - android
+          - ios
 
 jobs:
   android:
     name: Android APK
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == 'android'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +70,7 @@ jobs:
 
   ios:
     name: iOS Unsigned IPA
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == 'ios'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
