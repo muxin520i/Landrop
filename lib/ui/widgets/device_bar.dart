@@ -8,34 +8,25 @@ class DeviceBar extends StatelessWidget {
     required this.peers,
     required this.activeId,
     required this.onSelect,
-    required this.onScan,
   });
 
   final List<PeerDevice> peers;
   final String? activeId;
   final ValueChanged<String> onSelect;
-  final VoidCallback onScan;
 
   @override
   Widget build(BuildContext context) {
+    if (peers.isEmpty) return const SizedBox.shrink();
+
     return SizedBox(
       height: 88,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        itemCount: peers.length + 1,
+        itemCount: peers.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (context, index) {
-          if (index == 0) {
-            return _Chip(
-              label: '扫码连接',
-              icon: Icons.qr_code_scanner_rounded,
-              active: false,
-              online: true,
-              onTap: onScan,
-            );
-          }
-          final peer = peers[index - 1];
+          final peer = peers[index];
           return _Chip(
             label: peer.alias,
             icon: peer.isIos

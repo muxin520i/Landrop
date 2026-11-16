@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
-
 import 'protocol.dart';
 import 'device_identity.dart';
 import 'models/chat_message.dart';
+import 'received_files.dart';
 
 typedef IncomingCreated = void Function(ChatMessage message);
 typedef TransferProgress = void Function(String messageId, double progress);
@@ -279,20 +278,8 @@ class TransferServer {
     await request.response.close();
   }
 
-  Future<Directory> _receiveDir() async {
-    Directory base;
-    if (Platform.isAndroid) {
-      base = await getExternalStorageDirectory() ??
-          await getApplicationDocumentsDirectory();
-    } else {
-      base = await getApplicationDocumentsDirectory();
-    }
-    final dir = Directory('${base.path}/Received');
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    return dir;
-  }
+  /// 落盘目录与「管理文件」页共用同一套规则，避免两处各算一遍。
+  Future<Directory> _receiveDir() => receiveDir();
 
   Future<File> _uniqueTarget(Directory dir, String name) async {
     var target = File('${dir.path}/$name');

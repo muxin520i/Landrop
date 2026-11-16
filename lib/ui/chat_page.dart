@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../core/models/chat_message.dart';
 import '../state/app_state.dart';
+import 'files_page.dart';
 import 'manual_connect_sheet.dart';
 import 'my_qr_sheet.dart';
 import 'scan_page.dart';
@@ -75,6 +76,11 @@ class _ChatPageState extends State<ChatPage> {
         ),
         actions: [
           IconButton(
+            tooltip: '扫码连接',
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            onPressed: () => _openScan(app),
+          ),
+          IconButton(
             tooltip: '我的连接码',
             icon: const Icon(Icons.qr_code_2_rounded),
             onPressed: () => showMyQrSheet(context),
@@ -83,8 +89,8 @@ class _ChatPageState extends State<ChatPage> {
             icon: const Icon(Icons.more_horiz_rounded),
             onSelected: (value) => _onMenu(value, app),
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'scan', child: Text('扫码连接')),
               PopupMenuItem(value: 'manual', child: Text('手动输入 IP')),
+              PopupMenuItem(value: 'files', child: Text('管理文件')),
               PopupMenuDivider(),
               PopupMenuItem(value: 'clear', child: Text('清空记录')),
             ],
@@ -98,7 +104,6 @@ class _ChatPageState extends State<ChatPage> {
             peers: app.peers,
             activeId: app.activePeerId,
             onSelect: app.selectPeer,
-            onScan: () => _openScan(app),
           ),
           Expanded(
             child: !app.historyLoaded
@@ -314,10 +319,12 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _onMenu(String value, AppState app) async {
     switch (value) {
-      case 'scan':
-        await _openScan(app);
       case 'manual':
         await showManualConnectSheet(context, app);
+      case 'files':
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FilesPage()),
+        );
       case 'clear':
         final ok = await showDialog<bool>(
           context: context,
