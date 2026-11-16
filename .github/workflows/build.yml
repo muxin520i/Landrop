@@ -70,8 +70,11 @@ jobs:
 
   ios:
     name: iOS Unsigned IPA
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == 'ios'
-    runs-on: macos-14
+    # iOS 只在打 tag 或手动指定时构建：推送代码时不必消耗 macOS runner
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'ios'))
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
