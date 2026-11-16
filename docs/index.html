@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>近传 · 下载与安装</title>
+<meta name="description" content="近传（Landrop）是局域网文件互传工具：两台手机连同一个 Wi-Fi 即可直接传文件，不经过服务器，支持大文件分块续传与扫码连接。提供 Android apk 与 iOS 未签名 ipa。">
+<meta name="theme-color" content="#0b0d12">
+<style>
+  :root {
+    --bg: #0a0c11;
+    --panel: #12161f;
+    --panel-2: #171c27;
+    --text: #eef1f6;
+    --muted: #98a2b3;
+    --faint: #6b7484;
+    --line: rgba(255, 255, 255, .075);
+    --accent: #4c8dff;
+    --accent-2: #7aa8ff;
+    --ok: #3ecf8e;
+    --warn: #f2b544;
+    --code: #0d1017;
+    --shadow: 0 24px 60px rgba(0, 0, 0, .45);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f2f4f7;
+      --text: #101828;
+      --muted: #5b6472;
+      --faint: #8a93a2;
+      --line: rgba(16, 24, 40, .09);
+      --accent: #2f6fed;
+      --accent-2: #1e5bd8;
+      --ok: #12b76a;
+      --warn: #b7791f;
+      --code: #f2f4f7;
+      --shadow: 0 18px 44px rgba(16, 24, 40, .09);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.7 -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .glow {
+    position: fixed;
+    inset: -20% 0 auto;
+    height: 620px;
+    background:
+      radial-gradient(760px 420px at 22% -10%, rgba(76, 141, 255, .26), transparent 62%),
+      radial-gradient(620px 380px at 82% 0%, rgba(122, 168, 255, .16), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  main {
+    position: relative;
+    z-index: 1;
+    width: min(860px, 100% - 40px);
+    margin: 0 auto;
+    padding: 64px 0 80px;
+  }
+  header { text-align: center; }
+
+  .icon {
+    width: 76px; height: 76px;
+    margin: 0 auto 20px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, #5b9bff, #2f6fed 55%, #1b47b8);
+    box-shadow: 0 14px 34px rgba(47, 111, 237, .38);
+    display: grid; place-items: center;
+  }
+  .icon svg { width: 42px; height: 42px; }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 34px;
+    line-height: 1.2;
+    letter-spacing: -.02em;
+    font-weight: 700;
+  }
+  .tagline { margin: 0 0 20px; color: var(--muted); font-size: 15.5px; }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    justify-content: center;
+    margin-bottom: 26px;
+  }
+  .chip {
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+  }
+  .chip strong { color: var(--text); font-weight: 600; }
+
+  .actions {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    justify-content: center;
+    margin-bottom: 14px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 46px;
+    padding: 0 24px;
+    border-radius: 13px;
+    font-size: 15px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn.primary {
+    color: #fff;
+    background: linear-gradient(180deg, var(--accent-2), var(--accent));
+    box-shadow: 0 12px 26px rgba(47, 111, 237, .32);
+  }
+  .btn.primary:hover { box-shadow: 0 16px 32px rgba(47, 111, 237, .42); }
+  .btn.ghost {
+    color: var(--text);
+    background: var(--panel);
+    border-color: var(--line);
+  }
+  .btn.ghost:hover { background: var(--panel-2); }
+  .btn svg { width: 17px; height: 17px; flex: none; }
+  .btn[aria-disabled="true"] {
+    opacity: .5;
+    pointer-events: none;
+  }
+  .hint { margin: 0; font-size: 12.5px; color: var(--faint); }
+
+  section {
+    margin-top: 46px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 28px 30px;
+    box-shadow: var(--shadow);
+  }
+  h2 {
+    margin: 0 0 18px;
+    font-size: 18px;
+    letter-spacing: -.01em;
+    font-weight: 650;
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2 .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(76, 141, 255, .14);
+  }
+  h3 { margin: 0; }
+  h4 { margin: 20px 0 8px; font-size: 14.5px; font-weight: 650; }
+  .notes p { margin: 0 0 10px; color: var(--muted); }
+  .notes ul { margin: 0 0 12px; padding-left: 20px; color: var(--muted); }
+  .notes li { margin-bottom: 6px; }
+  .notes strong { color: var(--text); font-weight: 600; }
+
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; }
+  ol.steps li {
+    position: relative;
+    padding: 0 0 18px 40px;
+    counter-increment: s;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  ol.steps li:last-child { padding-bottom: 0; }
+  ol.steps li::before {
+    content: counter(s);
+    position: absolute; left: 0; top: 1px;
+    width: 26px; height: 26px;
+    border-radius: 9px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 12.5px; font-weight: 650;
+    display: grid; place-items: center;
+  }
+  ol.steps strong { color: var(--text); font-weight: 600; }
+  ol.steps li:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 12.5px; top: 30px; bottom: 6px;
+    width: 1px;
+    background: var(--line);
+  }
+
+  .qa { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
+  .qa:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  .qa h3 { margin: 0 0 6px; font-size: 14.5px; font-weight: 650; }
+  .qa p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+  .plat {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 12px;
+    font-size: 13px; font-weight: 650;
+    color: var(--text);
+    letter-spacing: .01em;
+  }
+  .plat .tag {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(76, 141, 255, .14);
+    color: var(--accent);
+    border: 1px solid rgba(76, 141, 255, .22);
+  }
+  .plat .tag.ios {
+    background: rgba(152, 162, 179, .12);
+    color: var(--muted);
+    border-color: var(--line);
+  }
+
+  .feature { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .feat {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .feat h4 { margin: 0 0 4px; font-size: 14px; }
+  .feat p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+  @media (max-width: 640px) {
+    main { padding: 44px 0 64px; }
+    h1 { font-size: 28px; }
+    section { padding: 22px 20px; border-radius: 16px; }
+    .split, .feature { grid-template-columns: 1fr; }
+    .btn { width: 100%; justify-content: center; }
+  }
+
+  footer {
+    margin-top: 40px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--faint);
+    line-height: 1.9;
+  }
+  .skeleton {
+    height: 14px; border-radius: 6px;
+    background: linear-gradient(90deg, var(--panel-2), var(--line), var(--panel-2));
+    background-size: 200% 100%;
+    animation: shimmer 1.3s infinite linear;
+    margin-bottom: 10px;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<main>
+  <header>
+    <div class="icon">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3.4 8.6h13.2" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <path d="M13.6 5.6 16.8 8.6l-3.2 3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M20.6 15.4H7.4" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <path d="M10.4 12.4 7.2 15.4l3.2 3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>近传</h1>
+    <p class="tagline">两台手机，同一个 Wi-Fi，直接传文件 · 不经服务器 · 大文件续传 · 扫码即连</p>
+
+    <div class="meta">
+      <span class="chip" id="verChip"><strong>读取中</strong></span>
+      <span class="chip" id="sizeChip">—</span>
+      <span class="chip" id="dateChip">—</span>
+    </div>
+
+    <div class="actions">
+      <a class="btn primary" id="dlApk" href="https://github.com/muxin520i/Landrop/releases/latest" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3v11m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 17v2.2c0 .99.8 1.8 1.8 1.8h12.4c.99 0 1.8-.81 1.8-1.8V17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span id="apkLabel">下载 Android 版</span>
+      </a>
+      <a class="btn ghost" id="dlIpa" href="https://github.com/muxin520i/Landrop/releases/latest" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3v11m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 17v2.2c0 .99.8 1.8 1.8 1.8h12.4c.99 0 1.8-.81 1.8-1.8V17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span id="ipaLabel">下载 iOS 版</span>
+      </a>
+      <a class="btn ghost" id="src" href="https://github.com/muxin520i/Landrop" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 18l-5-6 5-6M15 6l5 6-5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>源码</span>
+      </a>
+    </div>
+    <p class="hint">Android 6.0 以上直接安装 · iOS 12 以上需用 Sideloadly 自签，免费</p>
+  </header>
+
+  <section>
+    <h2><span class="dot"></span>它能做什么</h2>
+    <div class="feature">
+      <div class="feat">
+        <h4>不走服务器</h4>
+        <p>设备之间直连，文件不经过任何第三方。断网也能传，流量一分不花。</p>
+      </div>
+      <div class="feat">
+        <h4>大文件不卡</h4>
+        <p>分块传输，单文件支持到数 GB。中途断了从断点继续，不用重头再来。</p>
+      </div>
+      <div class="feat">
+        <h4>自动发现</h4>
+        <p>同一 Wi-Fi 下自动扫描在线设备，打开就能看到对方，不用配对码。</p>
+      </div>
+      <div class="feat">
+        <h4>扫码兜底</h4>
+        <p>路由器隔离或跨网段时，扫对方的码或手动填 IP，一样能连上。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>这一版改了什么</h2>
+    <div class="notes" id="notes">
+      <div class="skeleton" style="width:70%"></div>
+      <div class="skeleton" style="width:92%"></div>
+      <div class="skeleton" style="width:55%"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>安装步骤</h2>
+    <div class="split">
+      <div>
+        <p class="plat">Android <span class="tag">直接装</span></p>
+        <ol class="steps">
+          <li><strong>下载 apk</strong>：点上面的按钮，得到 <code>landrop-app-release.apk</code>。</li>
+          <li><strong>点击安装</strong>：系统提示「未知来源」时，选择允许本次安装。</li>
+          <li><strong>打开授权</strong>：首次启动同意文件访问与本地网络权限。</li>
+          <li><strong>连同一个 Wi-Fi</strong>：两台手机接入同一网络，打开 App 就能看到对方。</li>
+        </ol>
+      </div>
+      <div>
+        <p class="plat">iOS <span class="tag ios">需自签</span></p>
+        <ol class="steps">
+          <li><strong>下载 ipa</strong>：点上面的按钮，得到 <code>Landrop-unsigned.ipa</code>，不用解压。</li>
+          <li><strong>电脑装 Sideloadly</strong>：Windows 或 macOS 都行，从 <a href="https://sideloadly.io" target="_blank" rel="noopener">sideloadly.io</a> 下载。</li>
+          <li><strong>手机连电脑</strong>：数据线插上，解锁，弹「信任此电脑」时点信任。</li>
+          <li><strong>拖进 Sideloadly</strong>：填自己的 Apple ID，点 Start 等进度走完。</li>
+          <li><strong>信任证书</strong>：设置 → 通用 → VPN 与设备管理 → 点你的 Apple ID → 信任。</li>
+          <li><strong>打开开发者模式</strong>：iOS 16 以上，设置 → 隐私与安全性 → 开发者模式 → 打开并重启。</li>
+        </ol>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:20px">iOS 免费签名的包 7 天到期，重新签一次覆盖安装即可，App 里的记录不会丢。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>常见问题</h2>
+    <div class="qa">
+      <h3>两台手机都装了，但上方看不到对方</h3>
+      <p>先确认两台手机连的是同一个 Wi-Fi。很多路由器默认开了「AP 隔离」，会阻断设备互访，去路由器后台关掉。实在连不上，点右上角扫码，或手动输入对方的 IP 和端口。</p>
+    </div>
+    <div class="qa">
+      <h3>Android 装新版提示「应用未安装」或签名冲突</h3>
+      <p>说明手机上还留着早期测试包的旧签名。卸载旧版再装这次的新版即可，之后所有版本都用同一把钥匙签名，可以直接覆盖升级。</p>
+    </div>
+    <div class="qa">
+      <h3>iOS 过了几天突然打不开</h3>
+      <p>免费 Apple ID 的签名有效期是 7 天。用 Sideloadly 重新签一次、覆盖安装就行，本地数据会保留。</p>
+    </div>
+    <div class="qa">
+      <h3>传输会不会走流量、经过服务器</h3>
+      <p>不会。两个设备在同一局域网内直接建立连接，文件只在这两台手机之间流动，不经过任何服务器。速度取决于路由器，通常比蓝牙快一个数量级。</p>
+    </div>
+    <div class="qa">
+      <h3>为什么不上架 App Store</h3>
+      <p>局域网互传需要在本地网络里监听端口、后台维持传输，这类能力和 App Store 的审核口径冲突，所以走自签分发。所有文件都只存在你自己的设备上。</p>
+    </div>
+  </section>
+
+  <footer>
+    版本与更新内容实时读取 GitHub Releases · 页面地址固定，可长期收藏<br>
+    <a href="https://github.com/muxin520i/Landrop/releases" target="_blank" rel="noopener">全部版本</a>
+    ·
+    <a href="https://github.com/muxin520i/Landrop" target="_blank" rel="noopener">源码仓库</a>
+  </footer>
+</main>
+
+<script>
+(function () {
+  var API = "https://api.github.com/repos/muxin520i/Landrop/releases/latest";
+  var REPO = "https://github.com/muxin520i/Landrop";
+  var CACHE_KEY = "landrop-release-v1";
+
+  function fmtSize(bytes) {
+    if (!bytes) return "—";
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MB";
+    return Math.round(bytes / 1024) + " KB";
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d)) return "—";
+    return d.getFullYear() + "-" +
+      String(d.getMonth() + 1).padStart(2, "0") + "-" +
+      String(d.getDate()).padStart(2, "0");
+  }
+
+  function escapeHTML(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function inline(s) {
+    return s
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  }
+
+  function renderMarkdown(md) {
+    var lines = escapeHTML(md || "").split("\n");
+    var html = "";
+    var inList = false;
+
+    function closeList() {
+      if (inList) { html += "</ul>"; inList = false; }
+    }
+
+    lines.forEach(function (raw) {
+      var line = raw.trim();
+      if (!line) { closeList(); return; }
+      if (/^#{2,4}\s+/.test(line)) {
+        closeList();
+        html += "<h4>" + inline(line.replace(/^#{2,4}\s+/, "")) + "</h4>";
+        return;
+      }
+      if (/^[-*]\s+/.test(line)) {
+        if (!inList) { html += "<ul>"; inList = true; }
+        html += "<li>" + inline(line.replace(/^[-*]\s+/, "")) + "</li>";
+        return;
+      }
+      closeList();
+      html += "<p>" + inline(line) + "</p>";
+    });
+    closeList();
+    return html;
+  }
+
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!text) { el.style.display = "none"; return; }
+    el.textContent = text;
+    el.style.display = "";
+  }
+
+  function bindDownload(btnId, labelId, asset, fallbackLabel) {
+    var btn = document.getElementById(btnId);
+    var label = document.getElementById(labelId);
+    if (!btn) return;
+    if (asset) {
+      btn.href = asset.browser_download_url;
+      btn.setAttribute("download", "");
+      btn.removeAttribute("aria-disabled");
+    } else {
+      btn.href = REPO + "/releases/latest";
+      btn.setAttribute("aria-disabled", "true");
+      if (label) label.textContent = fallbackLabel;
+    }
+  }
+
+  function applyRelease(rel, fromCache) {
+    var assets = rel.assets || [];
+    var apk = assets.filter(function (a) { return /\.apk$/i.test(a.name); })[0];
+    var ipa = assets.filter(function (a) { return /\.ipa$/i.test(a.name); })[0];
+
+    var ver = document.getElementById("verChip");
+    ver.innerHTML = "<strong>" + escapeHTML(rel.tag_name) + "</strong>" +
+      (fromCache ? " · 缓存" : " 最新版");
+
+    var sizeChip = document.getElementById("sizeChip");
+    if (apk) {
+      sizeChip.textContent = "APK " + fmtSize(apk.size) +
+        (ipa ? " · IPA " + fmtSize(ipa.size) : "");
+      sizeChip.style.display = "";
+    } else {
+      sizeChip.style.display = "none";
+    }
+    setText("dateChip", fmtDate(rel.published_at || rel.created_at));
+
+    bindDownload("dlApk", "apkLabel", apk, "Android 版暂未发布");
+    bindDownload("dlIpa", "ipaLabel", ipa, "iOS 版构建中");
+
+    var notes = renderMarkdown(rel.body);
+    document.getElementById("notes").innerHTML = notes ||
+      '<p style="color:var(--muted)">这一版没有写更新说明，可以在 <a href="' + REPO +
+      '/releases" target="_blank" rel="noopener">Releases</a> 里查看历史。</p>';
+  }
+
+  function fallback() {
+    var cache = null;
+    try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (e) {}
+    if (cache && cache.tag_name) { applyRelease(cache, true); return; }
+
+    document.getElementById("verChip").innerHTML = "<strong>最新版</strong>";
+    document.getElementById("sizeChip").style.display = "none";
+    document.getElementById("dateChip").style.display = "none";
+    document.getElementById("notes").innerHTML =
+      '<p style="color:var(--muted)">更新说明没读到（可能是网络或接口限流）。直接去 <a href="' +
+      REPO + '/releases" target="_blank" rel="noopener">Releases 页面</a> 查看并下载。</p>';
+  }
+
+  fetch(API, { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) {
+      if (!r.ok) throw new Error("http " + r.status);
+      return r.json();
+    })
+    .then(function (rel) {
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(rel)); } catch (e) {}
+      applyRelease(rel, false);
+    })
+    .catch(fallback);
+})();
+</script>
+</body>
+</html>
