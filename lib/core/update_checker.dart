@@ -57,6 +57,9 @@ List<int> _segments(String version) {
 }
 
 /// 去 GitHub 查最新 release。不依赖任何账号，也不需要 token。
+///
+/// 两条路并行：API（能拿到更新说明）+ 发布页 302 跳转（不受 API 限流影响）。
+/// 谁先拿到用谁，都失败才返回 null。
 class UpdateChecker {
   const UpdateChecker();
 
@@ -65,15 +68,29 @@ class UpdateChecker {
 
   /// 查不到（离线、超时、限流、被墙）时返回 null，调用方按「稍后重试」处理。
   Future<UpdateInfo?> fetchLatest({
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 6),
   }) async {
+    final results = await Future.wait<UpdateInfo?>([
+      _fromApi(timeout),
+      _fromReleaseRedirect(timeout),
+    ]);
+    for (final info in results) {
+      if (info != null) return info;
+    }
+    return null;
+  }
+
+  Future<UpdateInfo?> _fromApi(Duration timeout) async {
     final client = HttpClient()..connectionTimeout = timeout;
     try {
       final request = await client.getUrl(Uri.parse(_api)).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
       request.headers.set(HttpHeaders.userAgentHeader, 'Landrop/$kAppVersion');
       final response = await request.close().timeout(timeout);
-      if (response.statusCode != HttpStatus.ok) return null;
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        return null;
+      }
       final body = await response.transform(utf8.decoder).join().timeout(timeout);
       final json = jsonDecode(body);
       if (json is! Map) return null;
@@ -88,6 +105,37 @@ class UpdateChecker {
         releaseUrl: url.isEmpty ? kReleasePage : url,
         notes: (json['body'] as String? ?? '').trim(),
         publishedAt: DateTime.tryParse(json['published_at'] as String? ?? ''),
+      );
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// `releases/latest` 会 302 到 `/releases/tag/vX.Y.Z`，从 Location 里读版本号。
+  /// 不读 JSON、不占 API 额度，是限流或 API 不通时的兜底。
+  Future<UpdateInfo?> _fromReleaseRedirect(Duration timeout) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    try {
+      final request = await client.getUrl(Uri.parse(kReleasePage)).timeout(timeout);
+      request.followRedirects = false;
+      request.headers.set(
+        HttpHeaders.userAgentHeader,
+        'Mozilla/5.0 (Landrop/$kAppVersion)',
+      );
+      final response = await request.close().timeout(timeout);
+      final location = response.headers.value(HttpHeaders.locationHeader) ?? '';
+      await response.drain<void>();
+
+      final match = RegExp(r'/releases/tag/([^/?#]+)').firstMatch(location);
+      if (match == null) return null;
+      final tag = Uri.decodeComponent(match.group(1)!);
+
+      return UpdateInfo(
+        currentVersion: kAppVersion,
+        latestVersion: tag.replaceFirst(RegExp(r'^[vV]'), ''),
+        releaseUrl: 'https://github.com/$kRepoOwner/$kRepoName/releases/tag/$tag',
       );
     } catch (_) {
       return null;
