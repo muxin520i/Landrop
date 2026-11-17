@@ -104,6 +104,7 @@ class AppState extends ChangeNotifier {
       onProgress: _onProgress,
       onCompleted: _onCompleted,
       onFailed: _onFailed,
+      webEnabled: AppSettings.instance.webAccess,
     );
     _server = server;
     await server.start();
@@ -175,6 +176,22 @@ class AppState extends ChangeNotifier {
   }
 
   bool get autoSavePhotos => AppSettings.instance.autoSavePhotos;
+
+  /// 电脑浏览器能不能访问本机。
+  bool get webAccessEnabled => AppSettings.instance.webAccess;
+
+  Future<void> setWebAccess(bool value) async {
+    await AppSettings.instance.setWebAccess(value);
+    _server?.webEnabled = value;
+    notifyListeners();
+  }
+
+  /// 电脑浏览器访问地址，没连 Wi-Fi 时为 null。
+  String? get webAddress {
+    final ip = localIp;
+    if (ip == null || ip.isEmpty) return null;
+    return 'http://$ip:$port';
+  }
 
   /// 手动搜索一次附近设备（界面上「搜索」按钮）。
   Future<void> rescan() async {

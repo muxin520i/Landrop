@@ -41,11 +41,11 @@ class ReceivedFile {
 }
 
 /// 已接收完成的文件，按修改时间倒序。未完成的 `.xxx.part` 不列出。
-Future<List<ReceivedFile>> listReceivedFiles() async {
+Future<List<ReceivedFile>> listReceivedFiles({Directory? dir}) async {
   final List<ReceivedFile> out = [];
   try {
-    final dir = await receiveDir();
-    await for (final entity in dir.list()) {
+    final target = dir ?? await receiveDir();
+    await for (final entity in target.list()) {
       if (entity is! File) continue;
       final name = entity.path.split(Platform.pathSeparator).last;
       if (name.startsWith('.') && name.endsWith('.part')) continue;

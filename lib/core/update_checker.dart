@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 /// 当前版本号。发版时与 pubspec.yaml 的 `version:` 保持一致。
-const String kAppVersion = '1.0.6';
+const String kAppVersion = '1.1.0';
 
 /// 仓库信息，用于检查更新与跳转下载页。
 const String kRepoOwner = 'muxin520i';

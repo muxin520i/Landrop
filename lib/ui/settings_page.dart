@@ -96,6 +96,32 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           const SizedBox(height: 18),
+          const _SectionLabel('电脑访问'),
+          _Card(
+            children: [
+              SwitchListTile.adaptive(
+                value: app.webAccessEnabled,
+                onChanged: (v) => app.setWebAccess(v),
+                title: const Text('允许电脑浏览器访问', style: TextStyle(fontSize: 14)),
+                subtitle: Text(
+                  '同一 Wi-Fi 下，电脑用浏览器就能传文件，不用装任何软件',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (app.webAccessEnabled) ...[
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                _WebAddressTile(
+                  address: app.webAddress,
+                  resolving: !app.localIpResolved,
+                  onCopy: _copyAddress,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 18),
           const _SectionLabel('关于'),
           _Card(
             children: [
@@ -256,6 +282,14 @@ class _SettingsPageState extends State<SettingsPage> {
     return result;
   }
 
+  Future<void> _copyAddress(String address) async {
+    await Clipboard.setData(ClipboardData(text: address));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('访问地址已复制')),
+    );
+  }
+
   Future<void> _rename(BuildContext context, AppState app) async {
     final controller = TextEditingController(text: app.identity.alias);
     final name = await showDialog<String>(
@@ -292,6 +326,50 @@ class _SettingsPageState extends State<SettingsPage> {
     controller.dispose();
     if (name == null) return;
     await app.renameDevice(name);
+  }
+}
+
+class _WebAddressTile extends StatelessWidget {
+  const _WebAddressTile({
+    required this.address,
+    required this.resolving,
+    required this.onCopy,
+  });
+
+  final String? address;
+  final bool resolving;
+  final Future<void> Function(String) onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasAddress = address != null;
+
+    return ListTile(
+      title: Text(
+        address ?? (resolving ? '正在获取地址…' : '未连接 Wi-Fi'),
+        style: TextStyle(
+          fontSize: 14,
+          letterSpacing: 0.2,
+          fontWeight: hasAddress ? FontWeight.w600 : FontWeight.w400,
+          color: hasAddress ? scheme.onSurface : scheme.onSurfaceVariant,
+        ),
+      ),
+      subtitle: Text(
+        hasAddress
+            ? '在电脑浏览器里打开这个地址\n手机保持「近传」在前台，锁屏后连接会断'
+            : '连上和电脑同一个 Wi-Fi 后，这里会显示访问地址',
+        style: TextStyle(
+          fontSize: 12,
+          height: 1.55,
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+      trailing: hasAddress
+          ? Icon(Icons.copy_rounded, size: 18, color: scheme.onSurfaceVariant)
+          : null,
+      onTap: hasAddress ? () => onCopy(address!) : null,
+    );
   }
 }
 
