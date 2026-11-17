@@ -1,11 +1,55 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../core/update_checker.dart';
 import '../state/app_state.dart';
 
-/// 设置页：设备名称、接收图片视频自动存相册。
-class SettingsPage extends StatelessWidget {
+/// 设置页：设备名称、接收图片视频自动存相册、版本检查。
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final UpdateChecker _checker = const UpdateChecker();
+
+  UpdateInfo? _info;
+  bool _checking = true;
+  bool _failed = false;
+
+  bool get _hasUpdate => _info?.hasUpdate ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    if (_checking && _info != null) return;
+    setState(() {
+      _checking = true;
+      _failed = false;
+    });
+    final info = await _checker.fetchLatest();
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _failed = info == null;
+      if (info != null) _info = info;
+    });
+  }
+
+  String get _statusText {
+    if (_hasUpdate) return '发现新版本 ${_info!.latestVersion}，点击查看';
+    if (_checking) return '正在检查更新…';
+    if (_failed) return '检查失败，点击重试';
+    return '已是最新版本';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,14 +100,56 @@ class SettingsPage extends StatelessWidget {
           _Card(
             children: [
               ListTile(
-                title: const Text('版本', style: TextStyle(fontSize: 14)),
-                trailing: Text(
-                  '1.0.5',
+                title: Row(
+                  children: [
+                    const Text('版本', style: TextStyle(fontSize: 14)),
+                    if (_hasUpdate) ...[
+                      const SizedBox(width: 6),
+                      _UpdateBadge(color: _accent),
+                    ],
+                  ],
+                ),
+                subtitle: Text(
+                  _statusText,
                   style: TextStyle(
-                    fontSize: 13,
-                    color: scheme.onSurfaceVariant,
+                    fontSize: 12,
+                    color: _hasUpdate ? _accent : scheme.onSurfaceVariant,
                   ),
                 ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_checking)
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.8,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    if (_checking) const SizedBox(width: 8),
+                    Text(
+                      _hasUpdate ? _info!.latestVersion : kAppVersion,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: _hasUpdate ? FontWeight.w600 : null,
+                        color: _hasUpdate ? _accent : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (_hasUpdate) ...[
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.arrow_outward_rounded,
+                        size: 14,
+                        color: _accent,
+                      ),
+                    ],
+                  ],
+                ),
+                onTap: _checking
+                    ? null
+                    : (_hasUpdate ? _showUpdateDialog : _check),
               ),
             ],
           ),
@@ -83,6 +169,89 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Color get _accent => const Color(0xFFE8890C);
+
+  Future<void> _showUpdateDialog() async {
+    final info = _info;
+    if (info == null) return;
+    final notes = _plainNotes(info.notes);
+    final scheme = Theme.of(context).colorScheme;
+
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('发现新版本 ${info.latestVersion}'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '当前版本 ${info.currentVersion}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  notes.isEmpty ? '本次更新包含体验优化与问题修复，建议升级。' : notes,
+                  style: const TextStyle(fontSize: 13, height: 1.65),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('以后再说'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('去下载'),
+          ),
+        ],
+      ),
+    );
+
+    if (go != true) return;
+    final uri = Uri.parse(info.releaseUrl);
+    var opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      opened = false;
+    }
+    if (!mounted) return;
+    if (opened) return;
+    await Clipboard.setData(ClipboardData(text: info.releaseUrl));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('打不开浏览器，下载链接已复制')),
+    );
+  }
+
+  /// Release 说明是 Markdown，这里压成可读纯文本。
+  String _plainNotes(String raw) {
+    final lines = <String>[];
+    for (final line in raw.split('\n')) {
+      var text = line.trim();
+      text = text.replaceAll(RegExp(r'^#{1,6}\s*'), '');
+      text = text.replaceAll(RegExp(r'^[-*+]\s+'), '· ');
+      text = text.replaceAll('**', '').replaceAll('`', '');
+      text = text.replaceAll(RegExp(r'\[(.*?)\]\((.*?)\)'), r'$1');
+      text = text.replaceAll(RegExp(r'^\|?[-:\s|]+\|?$'), '');
+      if (text.isEmpty) continue;
+      lines.add(text);
+    }
+    var result = lines.join('\n').trim();
+    if (result.length > 600) result = '${result.substring(0, 600)}…';
+    return result;
   }
 
   Future<void> _rename(BuildContext context, AppState app) async {
@@ -121,6 +290,32 @@ class SettingsPage extends StatelessWidget {
     controller.dispose();
     if (name == null) return;
     await app.renameDevice(name);
+  }
+}
+
+class _UpdateBadge extends StatelessWidget {
+  const _UpdateBadge({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '可更新',
+        style: TextStyle(
+          fontSize: 10,
+          height: 1.2,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
   }
 }
 
