@@ -52,7 +52,7 @@ class TransferServer {
     this.onFailed,
   });
 
-  final DeviceIdentity identity;
+  DeviceIdentity identity;
   final IncomingCreated? onIncomingCreated;
   final TransferProgress? onProgress;
   final TransferCompleted? onCompleted;
@@ -102,6 +102,8 @@ class TransferServer {
         await _handleInit(request);
       } else if (path == '/api/upload/chunk') {
         await _handleChunk(request);
+      } else if (path == '/api/text') {
+        await _handleText(request);
       } else {
         request.response.statusCode = HttpStatus.notFound;
         await request.response.close();
@@ -127,6 +129,52 @@ class TransferServer {
     request.response.headers.contentType = ContentType.json;
     request.response.write(body);
     await request.response.close();
+  }
+
+  /// 收一条文本消息（链接、验证码、地址）。
+  ///
+  /// 文本走 JSON 直传，不进分片流程——几十个字节的东西没必要建临时文件。
+  /// 落库与展示交给 onIncomingCreated，直接给出完成态。
+  Future<void> _handleText(HttpRequest request) async {
+    if (request.method != 'POST') {
+      await _json(request, HttpStatus.methodNotAllowed, {'error': 'POST only'});
+      return;
+    }
+    final raw = await utf8.decoder.bind(request).join();
+    if (raw.length > 64 * 1024) {
+      await _json(request, HttpStatus.requestEntityTooLarge, {
+        'error': 'text too long',
+      });
+      return;
+    }
+    Map<String, dynamic> map;
+    try {
+      map = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      await _json(request, HttpStatus.badRequest, {'error': 'invalid json'});
+      return;
+    }
+
+    final id = (map['id'] as String?)?.trim();
+    final text = (map['text'] as String?) ?? '';
+    if (id == null || id.isEmpty || text.trim().isEmpty) {
+      await _json(request, HttpStatus.badRequest, {'error': 'invalid params'});
+      return;
+    }
+
+    onIncomingCreated?.call(ChatMessage(
+      id: id,
+      peerId: (map['senderId'] as String?) ?? '',
+      peerAlias: ((map['sender'] as String?) ?? '附近设备').trim(),
+      direction: MessageDirection.incoming,
+      kind: MessageKind.text,
+      text: text,
+      fileName: '文本消息',
+      fileSize: utf8.encode(text).length,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      status: MessageStatus.success,
+    ));
+    await _json(request, HttpStatus.ok, {'ok': true});
   }
 
   Future<void> _handleInit(HttpRequest request) async {

@@ -2,6 +2,9 @@ enum MessageDirection { incoming, outgoing }
 
 enum MessageStatus { waiting, transferring, success, failed }
 
+/// 一条消息是文件还是纯文本（链接、验证码、地址等）。
+enum MessageKind { file, text }
+
 /// 聊天流里的一条文件消息。
 class ChatMessage {
   ChatMessage({
@@ -12,6 +15,8 @@ class ChatMessage {
     required this.fileName,
     required this.fileSize,
     required this.timestamp,
+    this.kind = MessageKind.file,
+    this.text,
     this.localPath,
     this.status = MessageStatus.waiting,
     this.progress = 0,
@@ -24,6 +29,11 @@ class ChatMessage {
   final MessageDirection direction;
   final String fileName;
   final int fileSize;
+
+  final MessageKind kind;
+
+  /// 文本消息的正文，文件消息为 null。
+  final String? text;
 
   /// 毫秒时间戳。
   final int timestamp;
@@ -39,6 +49,8 @@ class ChatMessage {
   final String? error;
 
   bool get isOutgoing => direction == MessageDirection.outgoing;
+
+  bool get isText => kind == MessageKind.text;
 
   bool get isDone => status == MessageStatus.success;
 
@@ -59,6 +71,8 @@ class ChatMessage {
       fileName: fileName,
       fileSize: fileSize,
       timestamp: timestamp,
+      kind: kind,
+      text: text,
       localPath: localPath ?? this.localPath,
       status: status ?? this.status,
       progress: progress ?? this.progress,
@@ -74,6 +88,8 @@ class ChatMessage {
         'fileName': fileName,
         'fileSize': fileSize,
         'timestamp': timestamp,
+        'kind': kind.name,
+        'text': text,
         'localPath': localPath,
         'status': status.name,
         'progress': progress,
@@ -92,6 +108,11 @@ class ChatMessage {
       fileName: (json['fileName'] as String?) ?? '未命名文件',
       fileSize: (json['fileSize'] as num?)?.toInt() ?? 0,
       timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      kind: MessageKind.values.firstWhere(
+        (e) => e.name == json['kind'],
+        orElse: () => MessageKind.file,
+      ),
+      text: json['text'] as String?,
       localPath: json['localPath'] as String?,
       status: MessageStatus.values.firstWhere(
         (e) => e.name == json['status'],
@@ -110,4 +131,14 @@ String formatBytes(int bytes) {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+}
+
+String formatSpeed(double bytesPerSecond) {
+  if (bytesPerSecond >= 1024 * 1024) {
+    return '${(bytesPerSecond / 1024 / 1024).toStringAsFixed(1)} MB/s';
+  }
+  if (bytesPerSecond >= 1024) {
+    return '${(bytesPerSecond / 1024).toStringAsFixed(0)} KB/s';
+  }
+  return '${bytesPerSecond.toStringAsFixed(0)} B/s';
 }

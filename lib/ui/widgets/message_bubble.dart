@@ -8,6 +8,7 @@ class MessageBubble extends StatelessWidget {
     required this.message,
     required this.onTap,
     this.onLongPress,
+    this.speedBps,
   });
 
   final ChatMessage message;
@@ -15,6 +16,9 @@ class MessageBubble extends StatelessWidget {
 
   /// 长按回调，带上手指位置——用来把操作浮层弹在消息旁边。
   final void Function(Offset globalPosition)? onLongPress;
+
+  /// 当前传输速度（字节/秒），仅文件传输中有值。
+  final double? speedBps;
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +53,12 @@ class MessageBubble extends StatelessWidget {
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.72,
                 ),
-                padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+                padding: EdgeInsets.fromLTRB(
+                  13,
+                  message.isText ? 10 : 11,
+                  13,
+                  message.isText ? 10 : 11,
+                ),
                 decoration: BoxDecoration(
                   color: bubbleColor,
                   borderRadius: BorderRadius.only(
@@ -72,32 +81,48 @@ class MessageBubble extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _iconFor(message.fileName),
-                          size: 19,
-                          color: fgColor.withOpacity(0.75),
+                    if (message.isText)
+                      Text(
+                        message.text ?? '',
+                        maxLines: 12,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: fgColor,
+                          fontSize: 14,
+                          height: 1.45,
                         ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            message.fileName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: fgColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              height: 1.3,
+                      )
+                    else
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _iconFor(message.fileName),
+                            size: 19,
+                            color: fgColor.withOpacity(0.75),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              message.fileName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: fgColor,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                height: 1.3,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    SizedBox(height: message.isText ? 5 : 8),
+                    _StatusLine(
+                      message: message,
+                      fgColor: fgColor,
+                      speedBps: speedBps,
                     ),
-                    const SizedBox(height: 8),
-                    _StatusLine(message: message, fgColor: fgColor),
                   ],
                 ),
               ),
@@ -162,17 +187,32 @@ class MessageBubble extends StatelessWidget {
 }
 
 class _StatusLine extends StatelessWidget {
-  const _StatusLine({required this.message, required this.fgColor});
+  const _StatusLine({
+    required this.message,
+    required this.fgColor,
+    this.speedBps,
+  });
 
   final ChatMessage message;
   final Color fgColor;
+  final double? speedBps;
 
   @override
   Widget build(BuildContext context) {
     final muted = fgColor.withOpacity(0.75);
+    final text = message.isText;
 
     switch (message.status) {
       case MessageStatus.transferring:
+        if (text) {
+          return Text(
+            '发送中…',
+            style: TextStyle(fontSize: 11, color: muted, height: 1.2),
+          );
+        }
+        final percent = (message.progress * 100).toStringAsFixed(0);
+        final speed = speedBps;
+        final detail = _detail(speed);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -191,7 +231,9 @@ class _StatusLine extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${(message.progress * 100).toStringAsFixed(0)}%  ·  ${formatBytes(message.fileSize)}',
+              detail == null
+                  ? '$percent%  ·  ${formatBytes(message.fileSize)}'
+                  : '$percent%  ·  $detail',
               style: TextStyle(fontSize: 11, color: muted, height: 1.2),
             ),
           ],
@@ -199,11 +241,19 @@ class _StatusLine extends StatelessWidget {
 
       case MessageStatus.waiting:
         return Text(
-          '排队中  ·  ${formatBytes(message.fileSize)}',
+          text
+              ? '发送中…'
+              : '排队中  ·  ${formatBytes(message.fileSize)}',
           style: TextStyle(fontSize: 11, color: muted, height: 1.2),
         );
 
       case MessageStatus.success:
+        if (text) {
+          return Text(
+            message.isOutgoing ? '已发送  ·  点击复制' : '已接收  ·  点击复制',
+            style: TextStyle(fontSize: 11, color: muted, height: 1.2),
+          );
+        }
         final label = message.isOutgoing
             ? '已送达  ·  ${formatBytes(message.fileSize)}'
             : '已接收  ·  ${formatBytes(message.fileSize)}  ·  点击打开';
@@ -235,6 +285,21 @@ class _StatusLine extends StatelessWidget {
           ],
         );
     }
+  }
+
+  /// 「3.2 MB/s · 剩余 12 秒」。速度还没采到样本时返回 null，只显示百分比。
+  String? _detail(double? speed) {
+    if (speed == null || speed <= 0) return null;
+    final text = formatSpeed(speed);
+    final remain = message.fileSize * (1 - message.progress);
+    if (remain <= 0) return text;
+    final seconds = remain / speed;
+    if (seconds.isNaN || seconds.isInfinite || seconds > 7200) return text;
+    if (seconds < 1) return '$text  ·  即将完成';
+    if (seconds < 60) return '$text  ·  剩余 ${seconds.round()} 秒';
+    final m = seconds ~/ 60;
+    final s = (seconds % 60).round();
+    return '$text  ·  剩余 $m 分 $s 秒';
   }
 }
 

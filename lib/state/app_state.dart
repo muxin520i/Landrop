@@ -4,10 +4,12 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../core/app_settings.dart';
 import '../core/chat_store.dart';
 import '../core/device_identity.dart';
 import '../core/discovery_service.dart';
@@ -46,6 +48,12 @@ class AppState extends ChangeNotifier {
   bool _initStarted = false;
   bool _disposed = false;
 
+  /// 系统型号生成的默认设备名，用户清空自定义名时回到它。
+  String? _systemAlias;
+
+  /// 每个正在传输的消息的速度采样。
+  final Map<String, _SpeedMeter> _speed = {};
+
   int _activeTransfers = 0;
   int _lastNotifyAt = 0;
 
@@ -65,6 +73,8 @@ class AppState extends ChangeNotifier {
     if (_initStarted) return;
     _initStarted = true;
 
+    // 设置读得很快，但设备名要用它覆盖系统型号名，所以先起一个 future
+    final settingsFuture = AppSettings.instance.load();
     // 三件事互不依赖，一起发起，避免平台通道调用串行累加
     final identityFuture = DeviceIdentity.load();
     final historyFuture = _store.load();
@@ -76,7 +86,17 @@ class AppState extends ChangeNotifier {
     _syncActivePeer();
     notifyListeners();
 
-    identity = await identityFuture;
+    await settingsFuture;
+    final loaded = await identityFuture;
+    _systemAlias = loaded.alias;
+    final custom = AppSettings.instance.customAlias;
+    identity = (custom == null || custom == loaded.alias)
+        ? loaded
+        : DeviceIdentity(
+            id: loaded.id,
+            alias: custom,
+            platform: loaded.platform,
+          );
 
     final server = TransferServer(
       identity: identity,
@@ -134,6 +154,28 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 改设备名。传空字符串表示恢复系统默认名。
+  /// 传输服务持有同一个 identity 引用，改完对端下次探测就能看到新名字。
+  Future<void> renameDevice(String name) async {
+    final trimmed = name.trim();
+    await AppSettings.instance.setAlias(trimmed.isEmpty ? null : trimmed);
+    final alias = trimmed.isEmpty ? (_systemAlias ?? identity.alias) : trimmed;
+    identity = DeviceIdentity(
+      id: identity.id,
+      alias: alias,
+      platform: identity.platform,
+    );
+    _server?.identity = identity;
+    notifyListeners();
+  }
+
+  Future<void> setAutoSavePhotos(bool value) async {
+    await AppSettings.instance.setAutoSavePhotos(value);
+    notifyListeners();
+  }
+
+  bool get autoSavePhotos => AppSettings.instance.autoSavePhotos;
+
   /// 手动搜索一次附近设备（界面上「搜索」按钮）。
   Future<void> rescan() async {
     await _discovery?.scan();
@@ -147,6 +189,61 @@ class AppState extends ChangeNotifier {
   // ---------------------------------------------------------------- 发送
 
   Future<void> _sendQueue = Future<void>.value();
+
+  /// 当前传输速度（字节/秒），没在传或还没采到样本时返回 null。
+  double? speedOf(String messageId) {
+    final bps = _speed[messageId]?.bps;
+    return (bps == null || bps <= 0) ? null : bps;
+  }
+
+  /// 发一条文本消息（链接、验证码、地址）。
+  Future<void> sendText(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final peer = activePeer;
+    if (peer == null) {
+      throw TransferException('请先在上方选择接收设备');
+    }
+
+    final message = ChatMessage(
+      id: const Uuid().v4(),
+      peerId: peer.id,
+      peerAlias: peer.alias,
+      direction: MessageDirection.outgoing,
+      kind: MessageKind.text,
+      text: trimmed,
+      fileName: '文本消息',
+      fileSize: utf8.encode(trimmed).length,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      status: MessageStatus.transferring,
+    );
+    messages.add(message);
+    notifyListeners();
+
+    try {
+      await _client.sendText(
+        peer: peer,
+        text: trimmed,
+        messageId: message.id,
+        senderAlias: identity.alias,
+        senderId: identity.id,
+      );
+      _replaceMessage(
+        message.id,
+        (m) => m.copyWith(status: MessageStatus.success, progress: 1),
+      );
+    } catch (e) {
+      _replaceMessage(
+        message.id,
+        (m) => m.copyWith(
+          status: MessageStatus.failed,
+          error: e is TransferException ? e.message : '$e',
+        ),
+      );
+    } finally {
+      unawaited(_store.save(messages));
+    }
+  }
 
   Future<void> sendFiles(List<String> paths) async {
     if (paths.isEmpty) return;
@@ -225,6 +322,54 @@ class AppState extends ChangeNotifier {
 
   Future<void> retryMessage(ChatMessage message) async {
     if (!message.isOutgoing) return;
+
+    // 文本消息：按原内容重发，不新建一条
+    if (message.isText) {
+      final text = message.text;
+      if (text == null || text.isEmpty) return;
+      PeerDevice? target;
+      for (final p in peers) {
+        if (p.id == message.peerId) {
+          target = p;
+          break;
+        }
+      }
+      if (target == null) {
+        _replaceMessage(
+          message.id,
+          (m) => m.copyWith(error: '对方已不在线，请重新选择设备'),
+        );
+        return;
+      }
+      _replaceMessage(
+        message.id,
+        (m) => m.copyWith(status: MessageStatus.transferring, error: ''),
+      );
+      try {
+        await _client.sendText(
+          peer: target,
+          text: text,
+          messageId: message.id,
+          senderAlias: identity.alias,
+          senderId: identity.id,
+        );
+        _replaceMessage(
+          message.id,
+          (m) => m.copyWith(status: MessageStatus.success),
+        );
+      } catch (e) {
+        _replaceMessage(
+          message.id,
+          (m) => m.copyWith(
+            status: MessageStatus.failed,
+            error: e is TransferException ? e.message : '$e',
+          ),
+        );
+      }
+      unawaited(_store.save(messages));
+      return;
+    }
+
     final path = message.localPath;
     PeerDevice? peer;
     for (final p in peers) {
@@ -251,16 +396,25 @@ class AppState extends ChangeNotifier {
 
   void _onIncomingCreated(ChatMessage message) {
     messages.add(message);
-    _beginTransfer();
+    // 文本消息到手即完成，不计入活跃传输，避免 wakelock 永远不释放
+    if (!message.isText) _beginTransfer();
     notifyListeners();
     unawaited(_store.save(messages));
   }
 
   void _onProgress(String id, double progress) {
+    final clamped = progress.clamp(0.0, 1.0);
+    final index = messages.indexWhere((m) => m.id == id);
+    if (index >= 0 && messages[index].fileSize > 0) {
+      final size = messages[index].fileSize;
+      _speed.putIfAbsent(id, () => _SpeedMeter()).update(
+            (clamped * size).round(),
+          );
+    }
     _replaceMessage(
       id,
       (m) => m.copyWith(
-        progress: progress.clamp(0.0, 1.0),
+        progress: clamped,
         status: m.isDone ? MessageStatus.success : MessageStatus.transferring,
       ),
       throttle: true,
@@ -268,6 +422,8 @@ class AppState extends ChangeNotifier {
   }
 
   void _onCompleted(String id, String path, int size) {
+    _speed.remove(id);
+    unawaited(_maybeSaveToGallery(path));
     _replaceMessage(
       id,
       (m) => m.copyWith(
@@ -281,6 +437,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _onFailed(String id, String error) {
+    _speed.remove(id);
     _replaceMessage(
       id,
       (m) => m.copyWith(status: MessageStatus.failed, error: error),
@@ -305,6 +462,32 @@ class AppState extends ChangeNotifier {
       _lastNotifyAt = now;
     }
     notifyListeners();
+  }
+
+  /// 收到的图片/视频自动写进系统相册。开关关着就直接返回，零开销。
+  Future<void> _maybeSaveToGallery(String path) async {
+    if (!AppSettings.instance.autoSavePhotos) return;
+    final dot = path.lastIndexOf('.');
+    if (dot < 0) return;
+    final ext = path.substring(dot + 1).toLowerCase();
+    const images = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'};
+    const videos = {'mp4', 'mov', 'm4v', '3gp', 'mkv', 'avi'};
+    final isImage = images.contains(ext);
+    final isVideo = videos.contains(ext);
+    if (!isImage && !isVideo) return;
+
+    try {
+      if (!await Gal.hasAccess()) {
+        if (!await Gal.requestAccess()) return;
+      }
+      if (isImage) {
+        await Gal.putImage(path);
+      } else {
+        await Gal.putVideo(path);
+      }
+    } catch (_) {
+      // 没授权、相册写不进去都不该影响接收本身
+    }
   }
 
   void _beginTransfer() {
@@ -378,6 +561,7 @@ class AppState extends ChangeNotifier {
   /// 清掉单条聊天记录。只动记录，不删文件——
   /// 发送方的源文件在用户自己的相册/文件里，接收方的文件由「管理文件」页负责删。
   Future<void> deleteMessage(String id) async {
+    _speed.remove(id);
     final before = messages.length;
     messages.removeWhere((m) => m.id == id);
     if (messages.length == before) return;
@@ -399,5 +583,33 @@ class AppState extends ChangeNotifier {
     _discovery?.dispose();
     _server?.stop();
     super.dispose();
+  }
+}
+
+/// 指数滑动平均的速度采样：单次抖动不会让「MB/s」乱跳。
+class _SpeedMeter {
+  int _lastBytes = 0;
+  int _lastMs = 0;
+  double bps = 0;
+
+  void update(int bytes) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_lastMs == 0) {
+      _lastBytes = bytes;
+      _lastMs = now;
+      return;
+    }
+    final seconds = (now - _lastMs) / 1000.0;
+    if (seconds < 0.15) return;
+    final delta = bytes - _lastBytes;
+    if (delta < 0) {
+      _lastBytes = bytes;
+      _lastMs = now;
+      return;
+    }
+    final instant = delta / seconds;
+    bps = bps <= 0 ? instant : bps * 0.65 + instant * 0.35;
+    _lastBytes = bytes;
+    _lastMs = now;
   }
 }

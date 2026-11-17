@@ -16,6 +16,10 @@ class _FilesPageState extends State<FilesPage> {
   List<ReceivedFile>? _files;
   bool _busy = false;
 
+  /// 多选模式：长按任意文件进入，标题栏变成「已选 N 项」。
+  bool _selecting = false;
+  final Set<String> _selected = {};
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +94,72 @@ class _FilesPageState extends State<FilesPage> {
     _snack('已删除 $removed 个文件');
   }
 
+  void _enterSelect(ReceivedFile file) {
+    setState(() {
+      _selecting = true;
+      _selected.add(file.path);
+    });
+  }
+
+  void _toggle(ReceivedFile file) {
+    setState(() {
+      if (!_selected.remove(file.path)) {
+        _selected.add(file.path);
+      }
+      if (_selected.isEmpty) _selecting = false;
+    });
+  }
+
+  void _exitSelect() {
+    setState(() {
+      _selecting = false;
+      _selected.clear();
+    });
+  }
+
+  void _toggleSelectAll() {
+    final all = _files ?? const <ReceivedFile>[];
+    setState(() {
+      if (_selected.length == all.length) {
+        _selected.clear();
+      } else {
+        _selected
+          ..clear()
+          ..addAll(all.map((e) => e.path));
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    final targets = (_files ?? const <ReceivedFile>[])
+        .where((f) => _selected.contains(f.path))
+        .toList();
+    if (targets.isEmpty) return;
+
+    final bytes = targets.fold<int>(0, (sum, f) => sum + f.size);
+    final ok = await _confirm(
+      '删除 ${targets.length} 个文件',
+      '共 ${formatBytes(bytes)}，会从本机磁盘上删掉，无法恢复。',
+      '删除',
+    );
+    if (ok != true) return;
+
+    setState(() => _busy = true);
+    final paths = targets.map((f) => f.path).toSet();
+    var removed = 0;
+    for (final file in targets) {
+      if (await deleteReceivedFile(file)) removed++;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _selecting = false;
+      _selected.clear();
+      _files = _files?.where((f) => !paths.contains(f.path)).toList();
+    });
+    _snack('已删除 $removed 个文件');
+  }
+
   Future<bool?> _confirm(String title, String content, String action) {
     return showDialog<bool>(
       context: context,
@@ -128,11 +198,25 @@ class _FilesPageState extends State<FilesPage> {
     final files = _files;
     final scheme = Theme.of(context).colorScheme;
 
+    final total = files?.length ?? 0;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('管理文件'),
+        leading: _selecting
+            ? IconButton(
+                tooltip: '退出多选',
+                icon: const Icon(Icons.close_rounded),
+                onPressed: _exitSelect,
+              )
+            : null,
+        title: Text(_selecting ? '已选 ${_selected.length} 项' : '管理文件'),
         actions: [
-          if (files != null && files.isNotEmpty)
+          if (_selecting)
+            TextButton(
+              onPressed: total == 0 ? null : _toggleSelectAll,
+              child: Text(_selected.length == total ? '取消全选' : '全选'),
+            ),
+          if (!_selecting && total > 0)
             IconButton(
               tooltip: '清空全部',
               icon: const Icon(Icons.delete_sweep_outlined),
@@ -141,6 +225,25 @@ class _FilesPageState extends State<FilesPage> {
           const SizedBox(width: 4),
         ],
       ),
+      bottomNavigationBar: _selecting
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.error,
+                    foregroundColor: scheme.onError,
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                  onPressed: (_selected.isEmpty || _busy)
+                      ? null
+                      : _deleteSelected,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                  label: Text('删除 ${_selected.length} 个文件'),
+                ),
+              ),
+            )
+          : null,
       body: files == null
           ? const Center(child: CircularProgressIndicator(strokeWidth: 2.4))
           : files.isEmpty
@@ -165,10 +268,20 @@ class _FilesPageState extends State<FilesPage> {
                         );
                       }
                       final file = files[index - 1];
+                      final selected = _selected.contains(file.path);
                       return _FileTile(
                         file: file,
-                        onTap: () => _open(file),
-                        onDelete: _busy ? null : () => _delete(file),
+                        selecting: _selecting,
+                        selected: selected,
+                        onTap: _selecting
+                            ? () => _toggle(file)
+                            : () => _open(file),
+                        onLongPress: _selecting
+                            ? () => _toggle(file)
+                            : () => _enterSelect(file),
+                        onDelete: (_busy || _selecting)
+                            ? null
+                            : () => _delete(file),
                       );
                     },
                   ),
@@ -182,11 +295,17 @@ class _FileTile extends StatelessWidget {
     required this.file,
     required this.onTap,
     required this.onDelete,
+    required this.selecting,
+    required this.selected,
+    required this.onLongPress,
   });
 
   final ReceivedFile file;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -194,15 +313,28 @@ class _FileTile extends StatelessWidget {
     final time = DateFormat('MM-dd HH:mm').format(file.modified);
 
     return Material(
-      color: scheme.surfaceContainerHighest.withOpacity(0.5),
+      color: selected
+          ? scheme.primary.withOpacity(0.10)
+          : scheme.surfaceContainerHighest.withOpacity(0.5),
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+          padding: EdgeInsets.fromLTRB(selecting ? 8 : 12, 10, 4, 10),
           child: Row(
             children: [
+              if (selecting) ...[
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 21,
+                  color: selected ? scheme.primary : scheme.outline,
+                ),
+                const SizedBox(width: 10),
+              ],
               Container(
                 width: 42,
                 height: 42,
@@ -243,15 +375,18 @@ class _FileTile extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                tooltip: '删除',
-                icon: Icon(
-                  Icons.delete_outline_rounded,
-                  size: 20,
-                  color: scheme.error,
-                ),
-                onPressed: onDelete,
-              ),
+              if (!selecting)
+                IconButton(
+                  tooltip: '删除',
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    size: 20,
+                    color: scheme.error,
+                  ),
+                  onPressed: onDelete,
+                )
+              else
+                const SizedBox(width: 8),
             ],
           ),
         ),

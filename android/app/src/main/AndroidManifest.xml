@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <!-- 扫码连接 -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- 「图片视频自动存相册」在 Android 10 以下需要写外部存储；10 及以上走 MediaStore -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
 
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 

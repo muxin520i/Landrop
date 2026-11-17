@@ -12,6 +12,7 @@ import 'files_page.dart';
 import 'manual_connect_sheet.dart';
 import 'my_qr_sheet.dart';
 import 'scan_page.dart';
+import 'settings_page.dart';
 import 'widgets/device_bar.dart';
 import 'widgets/message_bubble.dart';
 
@@ -24,11 +25,13 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _input = TextEditingController();
   int _lastCount = 0;
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _input.dispose();
     super.dispose();
   }
 
@@ -99,6 +102,7 @@ class _ChatPageState extends State<ChatPage> {
             icon: const Icon(Icons.more_horiz_rounded),
             onSelected: (value) => _onMenu(value, app),
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'settings', child: Text('设置')),
               PopupMenuItem(value: 'manual', child: Text('手动输入 IP')),
               PopupMenuItem(value: 'files', child: Text('管理文件')),
               PopupMenuDivider(),
@@ -148,6 +152,7 @@ class _ChatPageState extends State<ChatPage> {
                                 onTap: () => _onBubbleTap(app, message),
                                 onLongPress: (pos) =>
                                     _onBubbleLongPress(app, message, pos),
+                                speedBps: app.speedOf(message.id),
                               ),
                             ],
                           );
@@ -191,44 +196,74 @@ class _ChatPageState extends State<ChatPage> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: GestureDetector(
-                onTap: _pickAndSend,
-                child: Container(
-                  height: 44,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.centerLeft,
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: Text(
-                    hint,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+              child: Container(
+                height: 44,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                alignment: Alignment.centerLeft,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: TextField(
+                  controller: _input,
+                  minLines: 1,
+                  maxLines: 1,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _send(app),
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    hintText: hint,
+                    hintStyle: TextStyle(
                       fontSize: 13,
-                      color: peer == null
-                          ? scheme.onSurfaceVariant
-                          : scheme.onSurface,
+                      color: scheme.onSurfaceVariant.withOpacity(0.85),
                     ),
                   ),
                 ),
               ),
             ),
             const SizedBox(width: 10),
-            _CircleButton(
-              icon: Icons.arrow_upward_rounded,
-              background:
-                  canSend ? scheme.primary : scheme.surfaceContainerHighest,
-              foreground: canSend
-                  ? scheme.onPrimary
-                  : scheme.onSurfaceVariant.withOpacity(0.45),
-              onTap: _pickAndSend,
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _input,
+              builder: (context, value, _) {
+                final hasText = value.text.trim().isNotEmpty;
+                final enabled = hasText || canSend;
+                return _CircleButton(
+                  icon: Icons.arrow_upward_rounded,
+                  background:
+                      enabled ? scheme.primary : scheme.surfaceContainerHighest,
+                  foreground: enabled
+                      ? scheme.onPrimary
+                      : scheme.onSurfaceVariant.withOpacity(0.45),
+                  onTap: () => _send(app),
+                );
+              },
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// 有文字就发文本，没文字就走选文件——和聊天 App 的输入框习惯一致。
+  Future<void> _send(AppState app) async {
+    final text = _input.text.trim();
+    if (text.isEmpty) {
+      await _pickAndSend();
+      return;
+    }
+    if (app.activePeer == null) {
+      _snack('请先在上方选择接收设备');
+      return;
+    }
+    _input.clear();
+    try {
+      await app.sendText(text);
+    } catch (e) {
+      _snack('$e');
+    }
   }
 
   Future<void> _pickAndSend() async {
@@ -308,6 +343,16 @@ class _ChatPageState extends State<ChatPage> {
       await app.retryMessage(message);
       return;
     }
+
+    // 文本消息不做「打开」，点一下就是复制
+    if (message.isText) {
+      final text = message.text;
+      if (text == null || text.isEmpty) return;
+      await Clipboard.setData(ClipboardData(text: text));
+      _snack('已复制');
+      return;
+    }
+
     if (!message.isDone) return;
 
     final box = context.findRenderObject() as RenderBox?;
@@ -353,6 +398,27 @@ class _ChatPageState extends State<ChatPage> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       constraints: const BoxConstraints(minWidth: 132),
       items: [
+        if (message.isText)
+          PopupMenuItem<String>(
+            value: 'copy',
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.copy_rounded, size: 20, color: scheme.onSurface),
+                const SizedBox(width: 10),
+                Text(
+                  '复制',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
         PopupMenuItem<String>(
           value: 'delete',
           height: 44,
@@ -375,6 +441,14 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ],
     );
+    if (selected == 'copy') {
+      final text = message.text;
+      if (text != null && text.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: text));
+        _snack('已复制');
+      }
+      return;
+    }
     if (selected != 'delete') return;
     await app.deleteMessage(message.id);
     _snack('已清除这条记录');
@@ -398,6 +472,10 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _onMenu(String value, AppState app) async {
     switch (value) {
+      case 'settings':
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SettingsPage()),
+        );
       case 'manual':
         await showManualConnectSheet(context, app);
       case 'files':

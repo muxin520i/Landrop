@@ -43,6 +43,8 @@
 	<!-- 从相册选择照片或视频发送 -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>需要访问相册，才能选择照片或视频发送给对方。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>收到的照片和视频需要保存到你的相册。</string>
 
 	<!-- 接收到的文件在「文件」App 中可见：我的 iPhone → 近传 -->
 	<key>UIFileSharingEnabled</key>

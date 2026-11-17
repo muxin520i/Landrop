@@ -95,6 +95,51 @@ class TransferClient {
     }
   }
 
+  /// 发一条文本消息。几十个字节直接走 JSON，不进分片流程。
+  Future<void> sendText({
+    required PeerDevice peer,
+    required String text,
+    required String messageId,
+    required String senderAlias,
+    required String senderId,
+  }) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 8)
+      ..idleTimeout = const Duration(seconds: 10);
+
+    try {
+      final uri = Uri.parse('http://${peer.host}:${peer.port}/api/text');
+      final HttpClientRequest request;
+      try {
+        request =
+            await client.postUrl(uri).timeout(const Duration(seconds: 8));
+      } on SocketException {
+        throw TransferException('无法连接对方，请确认两台手机在同一 Wi-Fi');
+      } on TimeoutException {
+        throw TransferException('连接对方超时');
+      }
+
+      final body = utf8.encode(jsonEncode({
+        'id': messageId,
+        'text': text,
+        'sender': senderAlias,
+        'senderId': senderId,
+      }));
+      request.headers.contentType = ContentType.json;
+      request.contentLength = body.length;
+      request.add(body);
+
+      final response =
+          await request.close().timeout(const Duration(seconds: 10));
+      await response.drain<void>();
+      if (response.statusCode != HttpStatus.ok) {
+        throw TransferException('对方没有接收（${response.statusCode}）');
+      }
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<int> _init({
     required HttpClient client,
     required PeerDevice peer,
