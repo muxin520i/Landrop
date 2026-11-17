@@ -18,10 +18,8 @@ class Protocol {
   /// 设备探测的单次超时。同一网段 254 个地址批量探测时这个值决定总耗时。
   static const Duration probeTimeout = Duration(milliseconds: 420);
 
-  /// 扫描周期。仅在前台运行，扫描本身约 2 秒。
-  static const Duration scanInterval = Duration(seconds: 10);
-
   /// 超过这个时间没有探测成功，设备视为离线。
+  /// 只在搜索时用得上：一轮搜索结束后，太久没出现过的旧条目会被清掉。
   static const Duration offlineAfter = Duration(seconds: 40);
 
   /// 探测并发数。过高在部分路由器上会被限速，反而更慢。

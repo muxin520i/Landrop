@@ -34,6 +34,9 @@ class AppState extends ChangeNotifier {
   /// 本机 IP 已解析完成（无论有没有解析到），用于区分「还没查」与「确实没有 Wi-Fi」
   bool localIpResolved = false;
 
+  /// 正在搜索附近设备。
+  bool get scanning => _discovery?.isScanning ?? false;
+
   /// 传输服务与设备发现已就绪。UI 不依赖它，只用于「连接码」等功能的前置判断。
   bool initialized = false;
 
@@ -96,6 +99,8 @@ class AppState extends ChangeNotifier {
       _syncActivePeer();
       notifyListeners();
     });
+    // 搜索开始/结束都要刷新界面：按钮转圈、副标题文案都依赖它
+    discovery.scanning.addListener(_onScanStateChanged);
 
     initialized = true;
     _syncActivePeer();
@@ -129,8 +134,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 手动搜索一次附近设备（界面上「搜索」按钮）。
   Future<void> rescan() async {
-    await _discovery?.rescan();
+    await _discovery?.scan();
+  }
+
+  void _onScanStateChanged() {
+    if (_disposed) return;
+    notifyListeners();
   }
 
   // ---------------------------------------------------------------- 发送
@@ -364,6 +375,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// 清掉单条聊天记录。只动记录，不删文件——
+  /// 发送方的源文件在用户自己的相册/文件里，接收方的文件由「管理文件」页负责删。
+  Future<void> deleteMessage(String id) async {
+    final before = messages.length;
+    messages.removeWhere((m) => m.id == id);
+    if (messages.length == before) return;
+    notifyListeners();
+    await _store.save(messages);
+  }
+
   Future<void> clearHistory() async {
     messages.clear();
     notifyListeners();
@@ -373,6 +394,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _discovery?.scanning.removeListener(_onScanStateChanged);
     _peerSub?.cancel();
     _discovery?.dispose();
     _server?.stop();

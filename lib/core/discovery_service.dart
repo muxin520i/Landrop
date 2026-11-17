@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'protocol.dart';
+import 'package:flutter/foundation.dart';
+
 import 'device_identity.dart';
 import 'models/peer_device.dart';
+import 'protocol.dart';
 
 /// 设备发现。
 ///
@@ -13,7 +15,9 @@ import 'models/peer_device.dart';
 /// 这里改为「对本机所在 /24 网段的 254 个地址并发发一次 HTTP 探测」，
 /// 纯 TCP 单播，两端行为一致，在 iOS 上只需要「本地网络」权限。
 ///
-/// 一轮全量扫描约 2~4 秒；后续轮次只复探已知设备，每 3 轮做一次全量发现。
+/// **只搜一次，不常驻轮询**：App 打开时自动扫一轮（约 2~4 秒），扫完即停；
+/// 之后再想找设备，由用户点界面上的「搜索」按钮手动触发。
+/// 这样长时间停留在界面上不会反复扫整个网段，省电，也不会让路由器觉得异常。
 class DiscoveryService {
   DiscoveryService({required this.selfId, required this.port});
 
@@ -24,14 +28,16 @@ class DiscoveryService {
   final StreamController<List<PeerDevice>> _controller =
       StreamController<List<PeerDevice>>.broadcast();
 
-  Timer? _timer;
-  bool _scanning = false;
+  /// 是否正在搜索。UI 用它显示按钮转圈与副标题文案。
+  final ValueNotifier<bool> scanning = ValueNotifier<bool>(false);
+
   bool _disposed = false;
   bool _dirty = false;
-  int _round = 0;
   String? _localIp;
 
   Stream<List<PeerDevice>> get stream => _controller.stream;
+
+  bool get isScanning => scanning.value;
 
   List<PeerDevice> get devices {
     final list = _devices.values.toList();
@@ -42,42 +48,30 @@ class DiscoveryService {
     return list;
   }
 
-  /// 启动轮询。**只发起首轮扫描，不等待结果**——调用方（首屏）不能被网络探测拖住。
-  Future<void> start() async {
-    if (_disposed) return;
-    _timer ??= Timer.periodic(
-      Protocol.scanInterval,
-      (_) => _scanOnce(full: false),
-    );
-    unawaited(_scanOnce(full: true));
-  }
+  /// App 启动时调用：自动搜一轮，**不等待结果**，首屏不会被网络探测拖住。
+  Future<void> start() => scan();
 
-  /// 用户从扫码页回来时可主动触发一次。
-  Future<void> rescan() => _scanOnce(full: true);
-
-  Future<void> _scanOnce({required bool full}) async {
-    if (_scanning || _disposed) return;
-    _scanning = true;
-    _round++;
+  /// 搜一轮。启动时自动调用一次，之后由用户点「搜索」调用。
+  ///
+  /// 一轮约 2~4 秒（254 个地址 / 32 并发 / 420ms 超时）。边扫边推，
+  /// 设备一被发现就出现在列表里，不用等整轮结束。
+  Future<void> scan() async {
+    if (_disposed || scanning.value) return;
+    scanning.value = true;
     _dirty = false;
     try {
-      final doFull = full || _round % 3 == 1;
-
-      // 只有全量扫描才重新读网卡：切 Wi-Fi、换网段基本都靠它兜住，
-      // 而每 10 秒做一次的增量轮次没必要反复走平台通道。
-      if (doFull || _localIp == null) {
-        _localIp = await DeviceIdentity.localIpv4();
-      }
+      // 每次都重新读网卡：手动搜索的常见场景就是刚换了 Wi-Fi 或网段
+      _localIp = await DeviceIdentity.localIpv4();
       if (_disposed) return;
 
       final hosts = <String>[];
 
-      // 已知在线设备每轮都复探，保证状态及时刷新
+      // 已知设备先复探，保证旧条目的在线状态是新的
       for (final device in _devices.values) {
         hosts.add(device.host);
       }
 
-      if (doFull && _localIp != null) {
+      if (_localIp != null) {
         final prefix = _localIp!.substring(0, _localIp!.lastIndexOf('.'));
         for (var i = 1; i <= 254; i++) {
           final ip = '$prefix.$i';
@@ -90,19 +84,22 @@ class DiscoveryService {
         ..connectionTimeout = Protocol.probeTimeout
         ..idleTimeout = const Duration(seconds: 2);
 
-      for (var i = 0; i < hosts.length; i += Protocol.probeConcurrency) {
-        if (_disposed) break;
-        final end =
-            (i + Protocol.probeConcurrency).clamp(0, hosts.length).toInt();
-        final batch = hosts.sublist(i, end);
-        await Future.wait(batch.map((h) => _probe(h, client)));
-        // 边扫边推：设备一被发现就出现在列表里，不用等 254 个地址扫完
-        if (_dirty) {
-          _dirty = false;
-          _emit();
+      try {
+        for (var i = 0; i < hosts.length; i += Protocol.probeConcurrency) {
+          if (_disposed) break;
+          final end =
+              (i + Protocol.probeConcurrency).clamp(0, hosts.length).toInt();
+          final batch = hosts.sublist(i, end);
+          await Future.wait(batch.map((h) => _probe(h, client)));
+          // 边扫边推：设备一被发现就出现在列表里，不用等 254 个地址扫完
+          if (_dirty) {
+            _dirty = false;
+            _emit();
+          }
         }
+      } finally {
+        client.close(force: true);
       }
-      client.close(force: true);
 
       // 超过阈值没探测到的设备从列表移除
       final before = _devices.length;
@@ -115,7 +112,7 @@ class DiscoveryService {
         _emit();
       }
     } finally {
-      _scanning = false;
+      if (!_disposed) scanning.value = false;
     }
   }
 
@@ -168,7 +165,7 @@ class DiscoveryService {
 
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
+    scanning.dispose();
     _controller.close();
   }
 }

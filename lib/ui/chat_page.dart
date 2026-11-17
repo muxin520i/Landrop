@@ -2,6 +2,7 @@
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -51,6 +52,15 @@ class _ChatPageState extends State<ChatPage> {
 
     final scheme = Theme.of(context).colorScheme;
     final online = app.peers.where((p) => p.isOnline).length;
+    final subtitle = app.scanning
+        ? (app.peers.isEmpty
+            ? '正在搜索附近设备…'
+            : '正在搜索 · $online 台设备在线')
+        : app.peers.isEmpty
+            ? '未发现设备，点「搜索」'
+            : online == 0
+                ? '设备已离线，点「搜索」重试'
+                : '$online 台设备在线';
 
     return Scaffold(
       appBar: AppBar(
@@ -62,9 +72,9 @@ class _ChatPageState extends State<ChatPage> {
             const Text('近传'),
             const SizedBox(height: 1),
             Text(
-              app.peers.isEmpty
-                  ? '正在搜索附近设备…'
-                  : (online == 0 ? '设备已离线' : '$online 台设备在线'),
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
                 height: 1.2,
@@ -104,6 +114,8 @@ class _ChatPageState extends State<ChatPage> {
             peers: app.peers,
             activeId: app.activePeerId,
             onSelect: app.selectPeer,
+            onSearch: () => _search(app),
+            scanning: app.scanning,
           ),
           Expanded(
             child: !app.historyLoaded
@@ -111,6 +123,8 @@ class _ChatPageState extends State<ChatPage> {
                 ? const SizedBox.expand()
                 : app.messages.isEmpty
                     ? _EmptyState(
+                        onSearch: () => _search(app),
+                        scanning: app.scanning,
                         onScan: () => _openScan(app),
                         onQr: () => showMyQrSheet(context),
                       )
@@ -132,6 +146,8 @@ class _ChatPageState extends State<ChatPage> {
                               MessageBubble(
                                 message: message,
                                 onTap: () => _onBubbleTap(app, message),
+                                onLongPress: () =>
+                                    _onBubbleLongPress(app, message),
                               ),
                             ],
                           );
@@ -149,7 +165,7 @@ class _ChatPageState extends State<ChatPage> {
     final scheme = theme.colorScheme;
     final peer = app.activePeer;
     final hint =
-        peer == null ? '未发现设备，点击二维码扫码连接' : '发送到 ${peer.alias}';
+        peer == null ? '未发现设备，先在上方点「搜索」' : '发送到 ${peer.alias}';
     final canSend = peer != null && peer.isOnline;
 
     return SafeArea(
@@ -301,6 +317,114 @@ class _ChatPageState extends State<ChatPage> {
     if (error != null) _snack(error);
   }
 
+  Future<void> _search(AppState app) async {
+    if (app.scanning) return;
+    await app.rescan();
+  }
+
+  /// 长按文件气泡：清除这一条聊天记录。
+  /// 只删记录不删文件——发送方的源文件在用户自己的相册里，接收方的文件在「管理文件」页处理。
+  Future<void> _onBubbleLongPress(AppState app, ChatMessage message) async {
+    if (message.status == MessageStatus.transferring ||
+        message.status == MessageStatus.waiting) {
+      _snack('传输还没结束，稍后再清除');
+      return;
+    }
+    HapticFeedback.mediumImpact();
+
+    final scheme = Theme.of(context).colorScheme;
+    final remove = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                message.fileName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Material(
+                color: scheme.surfaceContainerHighest.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => Navigator.of(ctx).pop(true),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.delete_outline_rounded,
+                          size: 22,
+                          color: scheme.error,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '清除记录',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: scheme.error,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '只从聊天列表移除，不会删除文件',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (remove != true) return;
+    await app.deleteMessage(message.id);
+    _snack('已清除这条记录');
+  }
+
   Future<void> _openScan(AppState app) async {
     final raw = await Navigator.of(context).push<String>(
       MaterialPageRoute(
@@ -360,8 +484,15 @@ class _ChatPageState extends State<ChatPage> {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onScan, required this.onQr});
+  const _EmptyState({
+    required this.onSearch,
+    required this.scanning,
+    required this.onScan,
+    required this.onQr,
+  });
 
+  final VoidCallback onSearch;
+  final bool scanning;
   final VoidCallback onScan;
   final VoidCallback onQr;
 
@@ -396,12 +527,12 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 22),
             const Text(
-              '同一 Wi-Fi 下自动发现',
+              '同一 Wi-Fi 下互传文件',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
             Text(
-              '让对方也打开「近传」，\n设备会出现在上方，选中后即可发送文件。',
+              '让对方也打开「近传」，点上方「搜索」，\n设备出现后选中即可发送文件。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -425,6 +556,22 @@ class _EmptyState extends StatelessWidget {
               runSpacing: 10,
               alignment: WrapAlignment.center,
               children: [
+                FilledButton.icon(
+                  onPressed: scanning ? null : onSearch,
+                  icon: scanning
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              scheme.onPrimary,
+                            ),
+                          ),
+                        )
+                      : const Icon(Icons.radar_rounded, size: 18),
+                  label: Text(scanning ? '搜索中…' : '搜索附近设备'),
+                ),
                 FilledButton.tonalIcon(
                   onPressed: onScan,
                   icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),

@@ -7,10 +7,12 @@ class MessageBubble extends StatelessWidget {
     super.key,
     required this.message,
     required this.onTap,
+    this.onLongPress,
   });
 
   final ChatMessage message;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +40,7 @@ class MessageBubble extends StatelessWidget {
           Flexible(
             child: GestureDetector(
               onTap: onTap,
+              onLongPress: onLongPress,
               child: Container(
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.72,
