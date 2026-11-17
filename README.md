@@ -20,6 +20,8 @@
 
 > 手机上查架构：设置 → 关于手机 → 处理器，写 `arm64` / `64 位` 的选 `arm64-v8a`，写 `armeabi-v7a` / `32 位` 的选 `armeabi-v7a`。
 
+iOS 的 ipa 同样带版本号（`Landrop-1.1.0-unsigned.ipa`）。签名工具里出现多条「近传」，那是它保存的多个 ipa 文件，不是装了多个 App——bundle id 都是 `com.landrop.app`，同一个证书签出来的包装到手机上会直接覆盖旧版，桌面上始终只有一个图标。
+
 ---
 
 ## 功能

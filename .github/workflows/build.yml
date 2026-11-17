@@ -103,19 +103,22 @@ jobs:
       - name: Build iOS (no codesign)
         run: flutter build ios --release --no-codesign
 
+      # 文件名带上版本号，和 apk 保持一致：下载多个版本时不会重名成「xxx 2.ipa」
       - name: Package unsigned IPA
         run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d+ -f1)
           cd build/ios/iphoneos
-          rm -rf Payload Landrop-unsigned.ipa
+          IPA="Landrop-${VERSION}-unsigned.ipa"
+          rm -rf Payload "$IPA"
           mkdir -p Payload
           cp -R Runner.app Payload/
-          zip -qry Landrop-unsigned.ipa Payload
-          ls -lh Landrop-unsigned.ipa
+          zip -qry "$IPA" Payload
+          ls -lh "$IPA"
 
       - uses: actions/upload-artifact@v4
         with:
           name: landrop-ios-ipa
-          path: build/ios/iphoneos/Landrop-unsigned.ipa
+          path: build/ios/iphoneos/*.ipa
           if-no-files-found: error
 
       # 打成 tag 时：等 Android 先把 Release 建好（最多等 5 分钟），再把 ipa 挂上去
@@ -125,11 +128,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          IPA=$(ls build/ios/iphoneos/*.ipa | head -1)
+          echo "准备上传：$IPA"
           for i in $(seq 1 10); do
-            if gh release upload "${GITHUB_REF_NAME}" build/ios/iphoneos/Landrop-unsigned.ipa \
-                 --clobber --repo "${GITHUB_REPOSITORY}"; then
-              echo "ipa 已挂到 ${GITHUB_REF_NAME}"
-              exit 0
+            if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              # 先清掉这个 Release 里所有旧的 ipa，保证只留当前版本一份
+              gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets \
+                --jq '.assets[] | select(.name | test("\\.ipa$")) | .name' \
+                | while read -r old; do
+                    [ -z "$old" ] && continue
+                    echo "删除旧 ipa：$old"
+                    gh release delete-asset "${GITHUB_REF_NAME}" "$old" --yes --repo "${GITHUB_REPOSITORY}" || true
+                  done
+              if gh release upload "${GITHUB_REF_NAME}" "$IPA" --clobber --repo "${GITHUB_REPOSITORY}"; then
+                echo "ipa 已挂到 ${GITHUB_REF_NAME}"
+                exit 0
+              fi
             fi
             echo "第 $i 次失败，30 秒后重试（可能 Release 还没建好）"
             sleep 30
@@ -167,6 +181,6 @@ jobs:
         with:
           files: |
             artifacts/landrop-android-apk/*.apk
-            artifacts/landrop-ios-ipa/Landrop-unsigned.ipa
+            artifacts/landrop-ios-ipa/*.ipa
           fail_on_unmatched_files: false
           generate_release_notes: true
