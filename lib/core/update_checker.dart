@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -67,17 +68,36 @@ class UpdateChecker {
       'https://api.github.com/repos/$kRepoOwner/$kRepoName/releases/latest';
 
   /// 查不到（离线、超时、限流、被墙）时返回 null，调用方按「稍后重试」处理。
+  /// 两条通道竞速：先成功的那条立即返回，另一条不再等。
   Future<UpdateInfo?> fetchLatest({
     Duration timeout = const Duration(seconds: 6),
-  }) async {
-    final results = await Future.wait<UpdateInfo?>([
-      _fromApi(timeout),
-      _fromReleaseRedirect(timeout),
-    ]);
-    for (final info in results) {
-      if (info != null) return info;
+  }) {
+    final completer = Completer<UpdateInfo?>();
+    var pending = 2;
+
+    void settle(UpdateInfo? info) {
+      if (completer.isCompleted) return;
+      if (info != null) {
+        completer.complete(info);
+        return;
+      }
+      pending--;
+      if (pending == 0) completer.complete(null);
     }
-    return null;
+
+    _fromApi(timeout).then(settle).catchError((_) {
+      settle(null);
+      return null;
+    });
+    _fromReleaseRedirect(timeout).then(settle).catchError((_) {
+      settle(null);
+      return null;
+    });
+
+    return completer.future.timeout(
+      timeout + const Duration(seconds: 3),
+      onTimeout: () => null,
+    );
   }
 
   Future<UpdateInfo?> _fromApi(Duration timeout) async {

@@ -130,17 +130,16 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     if (_checking) const SizedBox(width: 8),
                     Text(
-                      _hasUpdate ? _info!.latestVersion : kAppVersion,
+                      kAppVersion,
                       style: TextStyle(
                         fontSize: 13,
-                        fontWeight: _hasUpdate ? FontWeight.w600 : null,
-                        color: _hasUpdate ? _accent : scheme.onSurfaceVariant,
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                     if (_hasUpdate) ...[
-                      const SizedBox(width: 2),
+                      const SizedBox(width: 4),
                       Icon(
-                        Icons.arrow_outward_rounded,
+                        Icons.arrow_forward_rounded,
                         size: 14,
                         color: _accent,
                       ),
@@ -244,7 +243,10 @@ class _SettingsPageState extends State<SettingsPage> {
       text = text.replaceAll(RegExp(r'^#{1,6}\s*'), '');
       text = text.replaceAll(RegExp(r'^[-*+]\s+'), '· ');
       text = text.replaceAll('**', '').replaceAll('`', '');
-      text = text.replaceAll(RegExp(r'\[(.*?)\]\((.*?)\)'), r'$1');
+      text = text.replaceAllMapped(
+        RegExp(r'\[([^\]]*)\]\(([^)]*)\)'),
+        (m) => (m.group(1) ?? '').isEmpty ? (m.group(2) ?? '') : m.group(1)!,
+      );
       text = text.replaceAll(RegExp(r'^\|?[-:\s|]+\|?$'), '');
       if (text.isEmpty) continue;
       lines.add(text);
