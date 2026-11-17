@@ -12,7 +12,9 @@ class MessageBubble extends StatelessWidget {
 
   final ChatMessage message;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
+
+  /// 长按回调，带上手指位置——用来把操作浮层弹在消息旁边。
+  final void Function(Offset globalPosition)? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +42,9 @@ class MessageBubble extends StatelessWidget {
           Flexible(
             child: GestureDetector(
               onTap: onTap,
-              onLongPress: onLongPress,
+              onLongPressStart: onLongPress == null
+                  ? null
+                  : (details) => onLongPress!(details.globalPosition),
               child: Container(
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.72,

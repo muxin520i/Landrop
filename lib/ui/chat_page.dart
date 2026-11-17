@@ -146,8 +146,8 @@ class _ChatPageState extends State<ChatPage> {
                               MessageBubble(
                                 message: message,
                                 onTap: () => _onBubbleTap(app, message),
-                                onLongPress: () =>
-                                    _onBubbleLongPress(app, message),
+                                onLongPress: (pos) =>
+                                    _onBubbleLongPress(app, message, pos),
                               ),
                             ],
                           );
@@ -322,9 +322,13 @@ class _ChatPageState extends State<ChatPage> {
     await app.rescan();
   }
 
-  /// 长按文件气泡：清除这一条聊天记录。
+  /// 长按文件气泡：贴着消息弹一个小浮层，点「清除记录」就删掉这一条。
   /// 只删记录不删文件——发送方的源文件在用户自己的相册里，接收方的文件在「管理文件」页处理。
-  Future<void> _onBubbleLongPress(AppState app, ChatMessage message) async {
+  Future<void> _onBubbleLongPress(
+    AppState app,
+    ChatMessage message,
+    Offset globalPosition,
+  ) async {
     if (message.status == MessageStatus.transferring ||
         message.status == MessageStatus.waiting) {
       _snack('传输还没结束，稍后再清除');
@@ -333,94 +337,45 @@ class _ChatPageState extends State<ChatPage> {
     HapticFeedback.mediumImpact();
 
     final scheme = Theme.of(context).colorScheme;
-    final remove = await showModalBottomSheet<bool>(
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+
+    final selected = await showMenu<String>(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          child: Column(
+      // 锚点就是手指按下的位置：菜单排在它下面，下方空间不够会自动翻到上面
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      color: scheme.surface,
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      constraints: const BoxConstraints(minWidth: 132),
+      items: [
+        PopupMenuItem<String>(
+          value: 'delete',
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: scheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
+              Icon(Icons.delete_outline_rounded, size: 20, color: scheme.error),
+              const SizedBox(width: 10),
               Text(
-                message.fileName,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
+                '清除记录',
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+                  color: scheme.error,
                 ),
-              ),
-              const SizedBox(height: 14),
-              Material(
-                color: scheme.surfaceContainerHighest.withOpacity(0.55),
-                borderRadius: BorderRadius.circular(16),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => Navigator.of(ctx).pop(true),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.delete_outline_rounded,
-                          size: 22,
-                          color: scheme.error,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '清除记录',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: scheme.error,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '只从聊天列表移除，不会删除文件',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('取消'),
               ),
             ],
           ),
         ),
-      ),
+      ],
     );
-    if (remove != true) return;
+    if (selected != 'delete') return;
     await app.deleteMessage(message.id);
     _snack('已清除这条记录');
   }
