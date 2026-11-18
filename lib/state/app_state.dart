@@ -28,7 +28,39 @@ class AppState extends ChangeNotifier {
   final ChatStore _store = ChatStore();
   final TransferClient _client = TransferClient();
 
-  List<PeerDevice> peers = [];
+  /// 局域网里发现到的手机。电脑网页是单独的虚拟设备，不混在这里。
+  List<PeerDevice> _discovered = [];
+
+  /// 有电脑网页正开着（心跳有效）。
+  bool _webOnline = false;
+
+  Timer? _webWatch;
+
+  /// 电脑网页在设备条里的固定 id。
+  static const String webPeerId = 'web';
+
+  /// 虚拟设备：电脑浏览器。发送时走本机待收队列，不走 HTTP 上传。
+  PeerDevice? get _webPeer {
+    final ip = localIp;
+    if (ip == null || ip.isEmpty) return null;
+    return PeerDevice(
+      id: webPeerId,
+      alias: '电脑网页',
+      platform: 'web',
+      host: ip,
+      port: port,
+      lastSeen: DateTime.now(),
+    );
+  }
+
+  /// 设备条数据：局域网手机 + 在线时追加电脑网页。
+  List<PeerDevice> get peers {
+    final out = [..._discovered];
+    final web = _webPeer;
+    if (_webOnline && web != null) out.add(web);
+    return out;
+  }
+
   List<ChatMessage> messages = [];
   String? activePeerId;
   String? localIp;
@@ -104,6 +136,7 @@ class AppState extends ChangeNotifier {
       onProgress: _onProgress,
       onCompleted: _onCompleted,
       onFailed: _onFailed,
+      onWebOutboxDone: _onWebOutboxDone,
       webEnabled: AppSettings.instance.webAccess,
     );
     _server = server;
@@ -113,10 +146,20 @@ class AppState extends ChangeNotifier {
       return;
     }
 
+    // 网页开着的时候设备条里会出现「电脑网页」，靠心跳判断在不在
+    _webWatch = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (_disposed) return;
+      final online = _server?.hasWebClient ?? false;
+      if (online == _webOnline) return;
+      _webOnline = online;
+      _syncActivePeer();
+      notifyListeners();
+    });
+
     final discovery = DiscoveryService(selfId: identity.id, port: server.port);
     _discovery = discovery;
     _peerSub = discovery.stream.listen((list) {
-      peers = list;
+      _discovered = list;
       _syncActivePeer();
       notifyListeners();
     });
@@ -221,6 +264,10 @@ class AppState extends ChangeNotifier {
     if (peer == null) {
       throw TransferException('请先在上方选择接收设备');
     }
+    if (peer.id == webPeerId) {
+      await _sendTextToWeb(peer, trimmed);
+      return;
+    }
 
     final message = ChatMessage(
       id: const Uuid().v4(),
@@ -268,12 +315,76 @@ class AppState extends ChangeNotifier {
     if (peer == null) {
       throw TransferException('请先在上方选择接收设备');
     }
+    if (peer.id == webPeerId) {
+      await _sendFilesToWeb(paths, peer);
+      return;
+    }
     for (final path in paths) {
       final message = await _createOutgoingMessage(path, peer);
       if (message == null) continue;
       // 串行排队，避免多个大文件互相抢带宽
       _sendQueue = _sendQueue.then((_) => _runSend(message, peer));
     }
+  }
+
+  // ------------------------------------------------------- 发给电脑网页
+
+  /// 文件不经过网络上传，只放进本机待收队列，等网页那边点下载。
+  Future<void> _sendFilesToWeb(List<String> paths, PeerDevice peer) async {
+    final server = _server;
+    if (server == null) throw TransferException('传输服务还没启动');
+    for (final path in paths) {
+      final message = await _createOutgoingMessage(path, peer);
+      if (message == null) continue;
+      server.enqueueWebFile(
+        messageId: message.id,
+        path: message.localPath!,
+        name: message.fileName,
+        size: message.fileSize,
+      );
+      _replaceMessage(
+        message.id,
+        (m) => m.copyWith(status: MessageStatus.waiting, waitingWeb: true),
+      );
+    }
+    await _store.save(messages);
+  }
+
+  Future<void> _sendTextToWeb(PeerDevice peer, String text) async {
+    final server = _server;
+    if (server == null) throw TransferException('传输服务还没启动');
+    final size = utf8.encode(text).length;
+    final message = ChatMessage(
+      id: const Uuid().v4(),
+      peerId: peer.id,
+      peerAlias: peer.alias,
+      direction: MessageDirection.outgoing,
+      kind: MessageKind.text,
+      text: text,
+      fileName: '文本消息',
+      fileSize: size,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      status: MessageStatus.success,
+      progress: 1,
+    );
+    messages.add(message);
+    notifyListeners();
+    server.enqueueWebText(messageId: message.id, text: text, size: size);
+    await _store.save(messages);
+  }
+
+  /// 网页把某一项下载走了。
+  void _onWebOutboxDone(String messageId) {
+    if (_disposed) return;
+    _replaceMessage(
+      messageId,
+      (m) => m.copyWith(
+        status: MessageStatus.success,
+        progress: 1,
+        waitingWeb: false,
+      ),
+    );
+    unawaited(_store.save(messages));
   }
 
   Future<ChatMessage?> _createOutgoingMessage(
@@ -339,6 +450,44 @@ class AppState extends ChangeNotifier {
 
   Future<void> retryMessage(ChatMessage message) async {
     if (!message.isOutgoing) return;
+
+    // 电脑网页：重新塞回待收队列，不能走 HTTP 上传（会传回自己）
+    if (message.peerId == webPeerId) {
+      final server = _server;
+      if (server == null) return;
+      if (message.isText) {
+        final text = message.text;
+        if (text == null || text.isEmpty) return;
+        server.enqueueWebText(
+          messageId: message.id,
+          text: text,
+          size: utf8.encode(text).length,
+        );
+        _replaceMessage(
+          message.id,
+          (m) => m.copyWith(status: MessageStatus.success, error: ''),
+        );
+      } else {
+        final path = message.localPath;
+        if (path == null) return;
+        server.enqueueWebFile(
+          messageId: message.id,
+          path: path,
+          name: message.fileName,
+          size: message.fileSize,
+        );
+        _replaceMessage(
+          message.id,
+          (m) => m.copyWith(
+            status: MessageStatus.waiting,
+            waitingWeb: true,
+            error: '',
+          ),
+        );
+      }
+      unawaited(_store.save(messages));
+      return;
+    }
 
     // 文本消息：按原内容重发，不新建一条
     if (message.isText) {
@@ -595,6 +744,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _webWatch?.cancel();
     _discovery?.scanning.removeListener(_onScanStateChanged);
     _peerSub?.cancel();
     _discovery?.dispose();

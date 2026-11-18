@@ -240,6 +240,12 @@ class _StatusLine extends StatelessWidget {
         );
 
       case MessageStatus.waiting:
+        if (message.waitingWeb) {
+          return Text(
+            '等待电脑下载  ·  ${formatBytes(message.fileSize)}',
+            style: TextStyle(fontSize: 11, color: muted, height: 1.2),
+          );
+        }
         return Text(
           text
               ? '发送中…'

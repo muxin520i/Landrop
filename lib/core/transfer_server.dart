@@ -14,6 +14,36 @@ typedef TransferCompleted = void Function(
     String messageId, String path, int size);
 typedef TransferFailed = void Function(String messageId, String error);
 
+/// 网页把手机发来的某一项下载完了。
+typedef WebOutboxDone = void Function(String messageId);
+
+/// 手机发给电脑网页、等待网页来取的文件或文本。
+class _WebOutboxItem {
+  _WebOutboxItem({
+    required this.id,
+    required this.messageId,
+    required this.name,
+    required this.size,
+    required this.createdAt,
+    this.path,
+    this.text,
+  });
+
+  final String id;
+  final String messageId;
+  final String name;
+  final int size;
+  final DateTime createdAt;
+
+  /// 文件路径；文本消息为 null。
+  final String? path;
+
+  /// 文本内容；文件为 null。
+  final String? text;
+
+  bool get isText => text != null;
+}
+
 class _Incoming {
   _Incoming({
     required this.fileId,
@@ -42,6 +72,10 @@ class _Incoming {
 ///   GET  /api/web/files                  文件列表 JSON
 ///   GET  /api/web/download?name=         下载单个文件
 ///   POST /api/web/upload?name&size       浏览器上传（请求体为原始字节）
+///   GET  /api/web/ping?cid=              网页心跳，同时报告待收数量
+///   GET  /api/web/outbox?cid=            手机发给网页的待收列表
+///   GET  /api/web/outbox?id=             下载某一项
+///   POST /api/web/outbox?id=             标记某一项已取走
 ///   GET  /api/info                       设备信息（发现探测用）
 ///   GET  /api/upload/init?fileId&name&size&sender&senderId
 ///                                        返回服务端已收到的字节数，用于续传
@@ -55,6 +89,7 @@ class TransferServer {
     this.onProgress,
     this.onCompleted,
     this.onFailed,
+    this.onWebOutboxDone,
     this.webEnabled = true,
     this.directoryProvider,
   });
@@ -64,6 +99,7 @@ class TransferServer {
   final TransferProgress? onProgress;
   final TransferCompleted? onCompleted;
   final TransferFailed? onFailed;
+  final WebOutboxDone? onWebOutboxDone;
 
   /// 是否允许电脑浏览器访问。关闭后根路径与 /api/web/* 一律拒绝。
   bool webEnabled;
@@ -73,6 +109,70 @@ class TransferServer {
 
   final Map<String, _Incoming> _incoming = {};
   HttpServer? _server;
+
+  /// 打开着的网页：cid -> 最后一次心跳时间。
+  final Map<String, DateTime> _webClients = {};
+
+  /// 手机发给网页、等网页来取的东西。
+  final List<_WebOutboxItem> _outbox = [];
+
+  int _outboxSeq = 0;
+
+  static const Duration _webTimeout = Duration(seconds: 20);
+
+  /// 是否有网页正开着（心跳 20 秒内有效）。
+  bool get hasWebClient {
+    final cutoff = DateTime.now().subtract(_webTimeout);
+    _webClients.removeWhere((_, seen) => seen.isBefore(cutoff));
+    return _webClients.isNotEmpty;
+  }
+
+  int get webOutboxCount => _outbox.length;
+
+  /// 把手机上的文件排进「等网页下载」队列。返回队列项 id。
+  String enqueueWebFile({
+    required String messageId,
+    required String path,
+    required String name,
+    required int size,
+  }) {
+    final id = _nextOutboxId();
+    _outbox.add(_WebOutboxItem(
+      id: id,
+      messageId: messageId,
+      name: name,
+      size: size,
+      createdAt: DateTime.now(),
+      path: path,
+    ));
+    return id;
+  }
+
+  String _nextOutboxId() =>
+      'ob-${DateTime.now().microsecondsSinceEpoch}-${++_outboxSeq}';
+
+  /// 把一段文本排进队列（电脑上点一下就能复制）。
+  String enqueueWebText({
+    required String messageId,
+    required String text,
+    required int size,
+  }) {
+    final id = _nextOutboxId();
+    _outbox.add(_WebOutboxItem(
+      id: id,
+      messageId: messageId,
+      name: '文本消息',
+      size: size,
+      createdAt: DateTime.now(),
+      text: text,
+    ));
+    return id;
+  }
+
+  /// 撤销某个还没被取走的队列项（消息发送失败时用）。
+  void cancelWebItem(String id) {
+    _outbox.removeWhere((e) => e.id == id);
+  }
 
   int get port => _server?.port ?? Protocol.transferPort;
 
@@ -128,6 +228,10 @@ class TransferServer {
         await _handleWebDownload(request);
       } else if (path == '/api/web/upload') {
         await _handleWebUpload(request);
+      } else if (path == '/api/web/ping') {
+        await _handleWebPing(request);
+      } else if (path == '/api/web/outbox') {
+        await _handleWebOutbox(request);
       } else {
         request.response.statusCode = HttpStatus.notFound;
         await request.response.close();
@@ -331,6 +435,113 @@ class TransferServer {
         await _json(request, HttpStatus.internalServerError, {'error': 'upload failed'});
       } catch (_) {}
     }
+  }
+
+  /// 网页心跳。带着 cid 来一次就算「这台电脑还在」，顺便把待收数量带回去。
+  Future<void> _handleWebPing(HttpRequest request) async {
+    if (!webEnabled) {
+      await _json(request, HttpStatus.forbidden, {'error': 'web access disabled'});
+      return;
+    }
+    final cid = (request.uri.queryParameters['cid'] ?? '').trim();
+    if (cid.isEmpty) {
+      await _json(request, HttpStatus.badRequest, {'error': 'missing cid'});
+      return;
+    }
+    _webClients[cid] = DateTime.now();
+    await _json(request, HttpStatus.ok, {
+      'ok': true,
+      'alias': identity.alias,
+      'outbox': _outbox.length,
+    });
+  }
+
+  /// 手机 → 网页的待收队列：列表 / 下载 / 取走。
+  Future<void> _handleWebOutbox(HttpRequest request) async {
+    if (!webEnabled) {
+      await _json(request, HttpStatus.forbidden, {'error': 'web access disabled'});
+      return;
+    }
+    final q = request.uri.queryParameters;
+    final cid = (q['cid'] ?? '').trim();
+    if (cid.isNotEmpty) _webClients[cid] = DateTime.now();
+
+    final id = (q['id'] ?? '').trim();
+
+    // 取走：网页下载完通知一声，手机上那条消息才变成「已发送」
+    if (request.method == 'POST') {
+      if (id.isEmpty) {
+        await _json(request, HttpStatus.badRequest, {'error': 'missing id'});
+        return;
+      }
+      String? messageId;
+      for (final item in _outbox) {
+        if (item.id == id) {
+          messageId = item.messageId;
+          break;
+        }
+      }
+      _outbox.removeWhere((e) => e.id == id);
+      if (messageId != null) onWebOutboxDone?.call(messageId);
+      await _json(request, HttpStatus.ok, {'ok': true});
+      return;
+    }
+
+    if (request.method != 'GET') {
+      await _json(request, HttpStatus.methodNotAllowed, {'error': 'GET or POST'});
+      return;
+    }
+
+    // 列表
+    if (id.isEmpty) {
+      await _json(request, HttpStatus.ok, {
+        'alias': identity.alias,
+        'items': [
+          for (final item in _outbox)
+            {
+              'id': item.id,
+              'name': item.name,
+              'size': item.size,
+              'text': item.text,
+              'mtime': item.createdAt.millisecondsSinceEpoch ~/ 1000,
+            },
+        ],
+      });
+      return;
+    }
+
+    // 下载某一项
+    _WebOutboxItem? item;
+    for (final candidate in _outbox) {
+      if (candidate.id == id) {
+        item = candidate;
+        break;
+      }
+    }
+    if (item == null) {
+      await _json(request, HttpStatus.notFound, {'error': 'not found'});
+      return;
+    }
+    if (item.isText || item.path == null) {
+      await _json(request, HttpStatus.badRequest, {'error': 'text item'});
+      return;
+    }
+
+    final file = File(item.path!);
+    if (!await file.exists()) {
+      _outbox.remove(item);
+      await _json(request, HttpStatus.notFound, {'error': 'file missing'});
+      return;
+    }
+
+    final stat = await file.stat();
+    final response = request.response;
+    response.statusCode = HttpStatus.ok;
+    response.headers.contentType = ContentType.parse(contentTypeFor(item.name));
+    response.headers.set('Content-Disposition', _disposition(item.name));
+    response.contentLength = stat.size;
+    await response.addStream(file.openRead());
+    await response.close();
   }
 
   /// 只接受接收目录下的普通文件名，挡掉路径穿越与隐藏的临时分片。

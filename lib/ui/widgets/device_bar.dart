@@ -38,9 +38,11 @@ class DeviceBar extends StatelessWidget {
           final peer = peers[index - 1];
           return _Chip(
             label: peer.alias,
-            icon: peer.isIos
-                ? Icons.phone_iphone_rounded
-                : Icons.phone_android_rounded,
+            icon: peer.platform == 'web'
+                ? Icons.desktop_windows_rounded
+                : peer.isIos
+                    ? Icons.phone_iphone_rounded
+                    : Icons.phone_android_rounded,
             active: peer.id == activeId,
             online: peer.isOnline,
             onTap: () => onSelect(peer.id),

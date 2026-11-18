@@ -21,6 +21,7 @@ class ChatMessage {
     this.status = MessageStatus.waiting,
     this.progress = 0,
     this.error,
+    this.waitingWeb = false,
   });
 
   final String id;
@@ -48,6 +49,9 @@ class ChatMessage {
 
   final String? error;
 
+  /// 发给「电脑网页」的文件：已放进待收队列，等网页那边点下载。
+  final bool waitingWeb;
+
   bool get isOutgoing => direction == MessageDirection.outgoing;
 
   bool get isText => kind == MessageKind.text;
@@ -62,6 +66,7 @@ class ChatMessage {
     double? progress,
     String? error,
     String? peerAlias,
+    bool? waitingWeb,
   }) {
     return ChatMessage(
       id: id,
@@ -77,6 +82,7 @@ class ChatMessage {
       status: status ?? this.status,
       progress: progress ?? this.progress,
       error: error ?? this.error,
+      waitingWeb: waitingWeb ?? this.waitingWeb,
     );
   }
 
@@ -94,6 +100,7 @@ class ChatMessage {
         'status': status.name,
         'progress': progress,
         'error': error,
+        'waitingWeb': waitingWeb,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -120,6 +127,7 @@ class ChatMessage {
       ),
       progress: (json['progress'] as num?)?.toDouble() ?? 0,
       error: json['error'] as String?,
+      waitingWeb: (json['waitingWeb'] as bool?) ?? false,
     );
   }
 }

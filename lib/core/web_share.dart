@@ -142,6 +142,21 @@ const String _template = r'''<!DOCTYPE html>
   .drop-hint{margin:0;font-size:12px;color:var(--muted)}
   #picker{display:none}
 
+  .inbox{
+    margin-top:14px;background:var(--card);border:1px solid var(--brand);
+    border-radius:16px;overflow:hidden;display:none;
+    box-shadow:0 8px 24px rgba(61,90,254,.14);
+  }
+  .inbox-head{display:flex;align-items:center;gap:8px;padding:11px 15px;
+    background:var(--brand-soft);color:var(--brand);font-size:12.5px;font-weight:700}
+  .inbox-head .n{margin-left:auto;font-weight:500;font-variant-numeric:tabular-nums}
+  .inbox .ico{background:var(--brand-soft);color:var(--brand)}
+  .inbox ul{border-radius:0}
+  .inbox li{padding:12px 15px}
+  .inbox .txt .desc{white-space:pre-wrap;word-break:break-word;max-height:84px;overflow:auto;
+    color:var(--text);font-size:12.5px}
+  .inbox .copy{border:0;font-family:inherit;cursor:pointer}
+
   .queue{margin-top:12px;display:flex;flex-direction:column;gap:8px}
   .q{
     background:var(--card);border-radius:12px;padding:11px 14px;
@@ -225,6 +240,11 @@ const String _template = r'''<!DOCTYPE html>
     <input type="file" id="picker" multiple>
   </div>
 
+  <div class="inbox" id="inbox">
+    <div class="inbox-head"><span>手机发来的</span><span class="n" id="inboxCount"></span></div>
+    <ul id="inboxList"></ul>
+  </div>
+
   <div class="queue" id="queue"></div>
 
   <section class="section">
@@ -250,6 +270,17 @@ const String _template = r'''<!DOCTYPE html>
   var dotEl = document.getElementById('dot');
   var stateText = document.getElementById('stateText');
   var subEl = document.getElementById('sub');
+  var inboxEl = document.getElementById('inbox');
+  var inboxList = document.getElementById('inboxList');
+  var inboxCount = document.getElementById('inboxCount');
+
+  // 这台电脑的临时标识：刷新页面不变，关掉标签页就换新的
+  var cid = '';
+  try { cid = sessionStorage.getItem('ld_cid') || ''; } catch (_) {}
+  if (!cid) {
+    cid = 'c' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    try { sessionStorage.setItem('ld_cid', cid); } catch (_) {}
+  }
 
   var uploading = 0;
   var lastFiles = [];
@@ -329,6 +360,102 @@ const String _template = r'''<!DOCTYPE html>
         render(data.files || []);
       })
       .catch(function () { setOnline(false); });
+  }
+
+  // ---------------------------------------------- 手机发过来的，等这里接收
+
+  function ping() {
+    fetch('/api/web/ping?cid=' + encodeURIComponent(cid), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function () { setOnline(true); })
+      .catch(function () { setOnline(false); });
+  }
+
+  function doneItem(id) {
+    fetch('/api/web/outbox?id=' + encodeURIComponent(id),
+      { method: 'POST', cache: 'no-store' })
+      .then(function () { pollInbox(); })
+      .catch(function () {});
+  }
+
+  function fallbackCopy(text, cb) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); cb(); } catch (_) {}
+    document.body.removeChild(ta);
+  }
+
+  function copyText(text, btn) {
+    function ok() {
+      btn.textContent = '已复制';
+      setTimeout(function () { btn.textContent = '复制'; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(function () {
+        fallbackCopy(text, ok);
+      });
+    } else {
+      fallbackCopy(text, ok);
+    }
+  }
+
+  function renderInbox(items) {
+    if (!items.length) {
+      inboxEl.style.display = 'none';
+      inboxList.innerHTML = '';
+      inboxCount.textContent = '';
+      return;
+    }
+    inboxEl.style.display = 'block';
+    inboxCount.textContent = items.length + ' 个';
+
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.text !== null && it.text !== undefined) {
+        html += '<li class="txt">' +
+          '<div class="ico">TXT</div>' +
+          '<div class="meta"><p class="name">文本消息</p>' +
+          '<p class="desc">' + esc(it.text) + '</p></div>' +
+          '<button class="dl copy" data-copy="' + i + '">复制</button></li>';
+      } else {
+        var url = '/api/web/outbox?id=' + encodeURIComponent(it.id);
+        html += '<li>' +
+          '<div class="ico ' + kind(it.name) + '">' + esc(tag(it.name)) + '</div>' +
+          '<div class="meta"><p class="name" title="' + esc(it.name) + '">' + esc(it.name) + '</p>' +
+          '<p class="desc">' + bytes(it.size) + ' · ' + when(it.mtime) + '</p></div>' +
+          '<a class="dl" href="' + url + '" download="' + esc(it.name) +
+          '" data-id="' + esc(it.id) + '">保存</a></li>';
+      }
+    }
+    inboxList.innerHTML = html;
+
+    Array.prototype.forEach.call(inboxList.querySelectorAll('a[data-id]'), function (a) {
+      a.addEventListener('click', function () {
+        var id = a.getAttribute('data-id');
+        // 浏览器已经开始下载，过一会儿再让手机把这条撤下
+        setTimeout(function () { doneItem(id); }, 2500);
+      });
+    });
+    Array.prototype.forEach.call(inboxList.querySelectorAll('button[data-copy]'), function (b) {
+      b.addEventListener('click', function () {
+        var it = items[parseInt(b.getAttribute('data-copy'), 10)];
+        if (!it) return;
+        copyText(it.text, b);
+        doneItem(it.id);
+      });
+    });
+  }
+
+  function pollInbox() {
+    fetch('/api/web/outbox?cid=' + encodeURIComponent(cid), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function (data) { renderInbox(data.items || []); })
+      .catch(function () {});
   }
 
   function addRow(name, size) {
@@ -416,6 +543,14 @@ const String _template = r'''<!DOCTYPE html>
   }, 8000);
 
   load();
+
+  // 心跳让手机知道有电脑开着；顺带把「手机发来的」拉下来
+  ping();
+  setInterval(ping, 4000);
+  pollInbox();
+  setInterval(function () {
+    if (!document.hidden) pollInbox();
+  }, 3000);
 })();
 </script>
 </body>
