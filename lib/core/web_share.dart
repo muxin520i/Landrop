@@ -153,8 +153,16 @@ const String _template = r'''<!DOCTYPE html>
   .inbox .ico{background:var(--brand-soft);color:var(--brand)}
   .inbox ul{border-radius:0}
   .inbox li{padding:12px 15px}
-  .inbox .txt .desc{white-space:pre-wrap;word-break:break-word;max-height:84px;overflow:auto;
-    color:var(--text);font-size:12.5px}
+  .inbox .txt .desc{white-space:pre-wrap;word-break:break-word;max-height:96px;overflow:auto;
+    color:var(--text);font-size:12.5px;cursor:text;
+    -webkit-user-select:text;user-select:text}
+  .inbox .acts{display:flex;align-items:center;gap:7px;flex:none}
+  .inbox .rm{
+    flex:none;width:28px;height:28px;padding:0;border:0;border-radius:8px;cursor:pointer;
+    background:var(--track);color:var(--muted);font-size:12px;line-height:1;
+    display:flex;align-items:center;justify-content:center;font-family:inherit;
+  }
+  .inbox .rm:active{opacity:.55}
   .inbox .copy{border:0;font-family:inherit;cursor:pointer}
 
   .queue{margin-top:12px;display:flex;flex-direction:column;gap:8px}
@@ -389,19 +397,18 @@ const String _template = r'''<!DOCTYPE html>
     document.body.removeChild(ta);
   }
 
-  function copyText(text, btn) {
-    function ok() {
-      btn.textContent = '已复制';
-      setTimeout(function () { btn.textContent = '复制'; }, 1500);
-    }
+  function copyText(text, cb) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(ok).catch(function () {
-        fallbackCopy(text, ok);
+      navigator.clipboard.writeText(text).then(cb).catch(function () {
+        fallbackCopy(text, cb);
       });
     } else {
-      fallbackCopy(text, ok);
+      fallbackCopy(text, cb);
     }
   }
+
+  // 复制过的文本在页面上留着，按钮状态跟着保留
+  var copiedIds = {};
 
   function renderInbox(items) {
     if (!items.length) {
@@ -421,7 +428,11 @@ const String _template = r'''<!DOCTYPE html>
           '<div class="ico">TXT</div>' +
           '<div class="meta"><p class="name">文本消息</p>' +
           '<p class="desc">' + esc(it.text) + '</p></div>' +
-          '<button class="dl copy" data-copy="' + i + '">复制</button></li>';
+          '<div class="acts">' +
+          '<button class="dl copy" data-copy="' + i + '">' +
+          (copiedIds[it.id] ? '已复制' : '复制') + '</button>' +
+          '<button class="rm" data-rm="' + esc(it.id) + '" title="移除">✕</button>' +
+          '</div></li>';
       } else {
         var url = '/api/web/outbox?id=' + encodeURIComponent(it.id);
         html += '<li>' +
@@ -445,8 +456,16 @@ const String _template = r'''<!DOCTYPE html>
       b.addEventListener('click', function () {
         var it = items[parseInt(b.getAttribute('data-copy'), 10)];
         if (!it) return;
-        copyText(it.text, b);
-        doneItem(it.id);
+        copyText(it.text, function () {
+          copiedIds[it.id] = true;
+          b.textContent = '已复制';
+        });
+        // 复制后不删：文字留在页面上，还能拖选其中一段再复制
+      });
+    });
+    Array.prototype.forEach.call(inboxList.querySelectorAll('button[data-rm]'), function (b) {
+      b.addEventListener('click', function () {
+        doneItem(b.getAttribute('data-rm'));
       });
     });
   }
